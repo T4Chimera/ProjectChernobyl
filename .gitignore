@@ -1,0 +1,10 @@
+/build/
+/web/node_modules/
+/web/dist/
+/web/test-results/
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+*.rbxlx.lock

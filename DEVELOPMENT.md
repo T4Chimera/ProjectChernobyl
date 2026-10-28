@@ -1,0 +1,122 @@
+# Development record
+
+## 2026-10-28 — Browser adaptation and GitHub Pages
+
+- Added an asset-free Three.js browser simulation with the six-sector facility,
+  articulated blocky figures, weapon flashlight, combat, ordinary infected,
+  all eight canonical bosses, and 20 intact-body execution timelines.
+- Exported canonical HP, names, dialogue, map coordinates and prototype tuning
+  directly from the evaluated Luau modules; Roblox source remains intact.
+- Added warning/briefing, force selection, damage-free recon option, Overwatch's
+  22 operational objectives and extraction, minimap, sprint stamina, supplies,
+  subtitles, synthesized placeholder audio, and mouse/touch controls.
+- Boss defeats and objective progress survive player redeployment within a run;
+  regular infected return. A full new run or page reload resets the session.
+- Fixed test fixture sector IDs, sandbox-compatible Node test execution, duplicate
+  death model, recoil/crosshair hit alignment, mirrored signs, crouch reset, and
+  repeated actor GPU cleanup. Added range/LOS interaction and respawn regression tests.
+- Twelve browser logic/actual-Three tests pass; Vite production build passes.
+  Initial Chromium checks show no runtime errors, valid deployment/first-person
+  controls, real movement and sprint stamina. Full smoke script is
+  `tools/browser-smoke.py`; browser checks do not imply Roblox Studio acceptance.
+- Added a GitHub Actions Pages deployment, committed `/docs` distribution and
+  root redirect for branch-based Pages hosting. Remote publication and public
+  deployment status must be verified separately from this local record.
+
+The browser is single-player static hosting, not a Roblox runtime or a multiplayer
+server. Spoken audio uses browser speech when available; actor recordings and
+final models/animation assets are still absent. See `WEB_README.md`.
+
+## 2026-10-28 — Six-sector gameplay prototype
+
+The creator approved expansion beyond the first milestone. The original brief is
+unchanged; `EXPANSION_BRIEF.md` records the new scope and non-graphic adaptations.
+All implementation in this entry is prototype code, not a claim of Studio acceptance.
+
+Implemented:
+
+- Six connected generated sectors, Reactor 1–4 structures, damaged Reactor 4,
+  unfinished Reactor 5–6 construction, industrial rooms/doors, seven supply crates,
+  and a Foundation checkpoint. All 25 fixture lights are off.
+- First-person procedural rifle with a permanently enabled mounted flashlight;
+  replicated world rifle/light, aim/recoil/reload/movement presentation, server
+  hitscan, finite direction/cadence/ammunition checks, and trusted resupply.
+- Four task-force selections with replicated placeholder patches, shared temporary
+  loadout, sprint and crouch posture. Final uniforms/abilities remain unassigned.
+- Server-only health/damage/healing/immunity, 100 max HP, intact bodies on death,
+  and checkpoint correction for players who spawned before map generation.
+- Ordinary infected, all eight exact canonical bosses, server-owned R6 stand-ins,
+  vision/hearing/search, body-obstacle/stuck-path fallback, bounded pathfinding,
+  melee/ranged attacks, death cleanup, and ordinary-infected respawns.
+- Unique boss registry whose lifetime is independent of players; no unique boss
+  respawns after defeat in that server. `workspace.BossesDefeated` tracks the count.
+- Mikoyan's peaceful sitting and room-only retaliation, Felon's hostility toward
+  infected, partner recognition, Katya hair states/puddle warnings and damage,
+  and configurable Sukhoi flee/fight behavior. Katya's prototype tether allows
+  players to lure her between sectors without omniscient targeting.
+- Exact dialogue categories and subtitles, per-speaker cooldowns, empty recording
+  slots, and optional spatial recorded audio/radio filtering. Proposed John/Jayden
+  dialogue remains off. Novak is silent; Mikoyan/Sukhoi restrictions are preserved.
+- Character-specific procedural idle/walk/combat/hit/death/sitting/appendage/mask
+  motion and optional uploaded Animator slots. All 20 requested execution variants
+  have intact-body timeline adaptations.
+- Server-validated low-health executions, staged poses, third-person wall-checked
+  camera, interruption/rescue, error/death/leave/respawn lock cleanup, and a
+  Studio-only deterministic variant preview selector.
+- HUD health/ammo/boss/sector/subtitles/menu, blood/reduced-motion settings,
+  mouse/touch/gamepad action bindings, bounded local shot/blood effects.
+- Updated Rojo mappings, Windows guide, Studio smoke scripts and full engine
+  acceptance checklist.
+
+Validation completed in the cloud:
+
+- **36 tests passed** using actual Luau module source with narrow explicit API
+  doubles: 13 foundation, 17 expanded rules/configuration, 6 execution lifecycle.
+- Negative cases include malformed damage inputs, reload timing/conservation,
+  rate limits, invalid registry states, one-way boss defeat, execution distance,
+  health/LOS/ForceField/lock gates, interruption/leave/removal, staging failure,
+  delayed lethal completion, and full anchor/movement/immunity/camera cleanup.
+- Map configuration checks confirm six unique sectors/reactors, valid fixed boss
+  spawns, Mikoyan's room bounds, and unfinished 5/6 status.
+- All production/test Luau files compile with Luau 0.659; Rojo 7.5.1 builds the
+  generated place. The build packages scripts; the map is created at runtime.
+- Full original design text remains preserved byte-for-byte from the upload.
+
+## Remaining acceptance and limitations
+
+Roblox Studio is unavailable in this Linux environment. Engine initialization,
+actual spawning and avatar loading, map geometry/navigation, flashlight rendering,
+camera clipping, performance, execution choreography, and multiplayer replication
+have **not** been tested in Studio. Run `STUDIO_TESTING.md` and report Output errors.
+
+Audio recordings, environmental soundscapes, final character/model references,
+authored rig-specific animations and lip sync are not supplied. All SoundId and
+AnimationId slots are empty. Runtime procedural animations are placeholders with
+character distinctions, not final cinematic acting. No asset identifiers were invented.
+
+The layout is fictionalized. R6 NPC stand-ins, player weapon/loadouts, movement,
+damage, ranges, reload values, health regeneration and respawn timing are temporary.
+Crouch lowers the camera/slows movement without reducing the collision capsule.
+No final keycard system, attachments, cross-server persistence, complete lore
+collection system, infection progression, mission campaign, or full final art is
+claimed. The unidentified body/letter and disputed backstories stay unresolved.
+
+Bodies remain intact. Requested dismemberment/detailed injury references became
+short staged takedowns with cutaways and limited stylized specks. Final animation
+timing, contact alignment, and custom rig compatibility need visual Studio review.
+
+## Next work
+
+First run the Studio checklist, fix observed engine issues, and tune map traversal,
+lighting and encounters with creator feedback. Then replace approved placeholders
+with supplied visual references, uploaded recordings and animation assets.
+See original Part 23 for unresolved canon/design decisions; this implementation
+does not silently finalize them.
+
+## Earlier milestone — Phase 1 foundation
+
+Created Rojo layout, complete preserved brief, mandatory rules, canonical registry,
+100-HP player initialization, server health API, first-person camera and a test
+platform. Thirteen initial logic tests and the CLI build passed. The subsequent
+creator request authorized replacing that small platform with the six-sector
+prototype above. The old Phase-1-only restriction is superseded.

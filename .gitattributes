@@ -1,0 +1,4 @@
+# Keep the creator's original uploaded brief byte-for-byte, including CRLF.
+GAME_DESIGN.md -text
+# Production bundles contain upstream shader strings and are generated from web/.
+docs/assets/* linguist-generated=true

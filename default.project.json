@@ -1,0 +1,65 @@
+{
+  "name": "ProjectChernobyl",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "Shared": {
+        "$path": "src/ReplicatedStorage/Shared"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+      "Main": {
+        "$path": "src/ServerScriptService/Main.server.luau"
+      },
+      "Services": {
+        "$path": "src/ServerScriptService/Services"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+      "$properties": {
+        "CameraMode": "LockFirstPerson"
+      },
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "$path": "src/StarterPlayer/StarterPlayerScripts"
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$ignoreUnknownInstances": true
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$ignoreUnknownInstances": true,
+      "$properties": {
+        "ClockTime": 0,
+        "Brightness": 0,
+        "Ambient": [
+          0.025,
+          0.03,
+          0.035
+        ],
+        "OutdoorAmbient": [
+          0.04,
+          0.05,
+          0.065
+        ],
+        "GlobalShadows": true,
+        "FogStart": 65,
+        "FogEnd": 360,
+        "FogColor": [
+          0.025,
+          0.03,
+          0.035
+        ]
+      }
+    }
+  }
+}
