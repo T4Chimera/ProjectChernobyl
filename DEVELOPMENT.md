@@ -1,5 +1,14 @@
 # Development record
 
+## 2026-10-28 — Public Pages deployment verified
+
+- Repository is public and Pages is enabled with the GitHub Actions source.
+- Dispatched deployment run `40774124766`; build and deploy both succeeded.
+- Verified `https://t4chimera.github.io/ProjectChernobyl/` and its JavaScript/CSS
+  assets return HTTP 200.
+- Opened the actual public site in Chromium: the game intro and Deploy button
+  loaded without JavaScript runtime errors. The previous hosting 404 is resolved.
+
 ## 2026-10-28 — Diagnose Pages 404
 
 - Confirmed all game code and production assets are on GitHub `main`.
