@@ -39,10 +39,12 @@ desktop. Mobile has move/look/action controls. Browser WebGL2 is required.
 The repository includes two supported publication paths:
 
 1. **GitHub Actions:** `.github/workflows/deploy-pages.yml` tests/builds `web/`
-   and deploys its artifact on pushes to `main`. The configure-pages action
-   attempts automatic Pages enablement. If repository permissions prevent that,
-   open repository **Settings > Pages > Build and deployment > Source** and
-   choose **GitHub Actions**, then rerun the deployment workflow.
+   and deploys its artifact on pushes to `main`. Pages requires one-time
+   administrative activation: open repository **Settings > Pages > Build and
+   deployment > Source**, choose **GitHub Actions**, then rerun the deployment
+   workflow. GitHub's default workflow token can deploy an enabled site; it
+   cannot enable a new Pages site. An authorized administrator can also perform
+   this activation through GitHub's Pages API.
 2. **Branch deployment:** the committed `docs/` contains the production build.
    In **Settings > Pages**, choose **Deploy from a branch**, branch `main`,
    folder `/docs`, then Save. The root `index.html` also redirects to this build

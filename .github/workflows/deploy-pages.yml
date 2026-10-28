@@ -38,9 +38,16 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # Pages must be enabled once in repository Settings > Pages. The default
+      # GITHUB_TOKEN can deploy an enabled site but cannot perform initial enablement.
+      - name: Configure enabled Pages site
+        uses: actions/configure-pages@v5
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Hosting setup guidance
+        if: failure()
+        run: |
+          echo '## GitHub Pages deployment needs attention' >> "$GITHUB_STEP_SUMMARY"
+          echo 'If Pages has not been enabled, open [repository Pages settings](https://github.com/T4Chimera/ProjectChernobyl/settings/pages), choose **GitHub Actions** as the source, then rerun this workflow.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The default workflow token cannot enable a new Pages site. Check the failed step above for any other deployment error.' >> "$GITHUB_STEP_SUMMARY"

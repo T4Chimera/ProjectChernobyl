@@ -1,5 +1,21 @@
 # Development record
 
+## 2026-10-28 — Diagnose Pages 404
+
+- Confirmed all game code and production assets are on GitHub `main`.
+- Found an invalid initial-hosting assumption: `configure-pages@v5` cannot
+  enable a new site using the default `GITHUB_TOKEN`. Removed `enablement: true`
+  and added explicit workflow failure guidance for one-time Pages activation.
+- The game and its relative asset paths already pass local production checks;
+  the root 404 is a hosting issue, not a missing built game entry point.
+- Direct Pages administration remains blocked: the environment proxy rejects
+  `https://api.github.com/repos/T4Chimera/ProjectChernobyl/pages` before an API
+  response. The allowed-domain additions are saved in the environment draft
+  but are not applied to the running environment. No new token is requested;
+  existing injected authentication must be tested after network access works.
+- Public hosting activation/deployment remains unverified. Do not change the
+  repository's visibility or claim the public play address is live.
+
 ## 2026-10-28 — Browser adaptation and GitHub Pages
 
 - Added an asset-free Three.js browser simulation with the six-sector facility,
