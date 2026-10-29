@@ -8,6 +8,8 @@ Roblox Studio. It does not connect to a Roblox server or provide multiplayer.
 
 ## Game features
 
+- Black-screen SCP emblem intro with heartbeat, low music, Skip and a covered
+  transition into play. Click BEGIN once to enable browser audio.
 - Warning/briefing, four task forces, operative and damage-free recon modes.
 - Six connected dark sectors with Reactors 1–4 and unfinished 5–6.
 - Permanent weapon-mounted flashlight, movement, jumping, sprint stamina,
@@ -25,6 +27,12 @@ Roblox Studio. It does not connect to a Roblox server or provide multiplayer.
   See [R6_IMPORT_GUIDE.md](R6_IMPORT_GUIDE.md) for the Studio handoff.
 - Twenty intact-body execution variants with third-person staging/cameras;
   ordinary death also uses third-person, returning to first-person after redeploy.
+- Shared continuous paired execution choreography, contact sounds, recorded
+  nonverbal cries, limited blood, and persistent grounded final poses.
+- EXECUTION LAB in the briefing/pause menus: select any boss/variant, play/pause,
+  replay, scrub, slow down, loop and orbit a lit baseplate stage.
+- Visible distance-driven sprinting with weight transfer and foot clearance for
+  the local operator and infected. Look down in first person to see your legs.
 - Overwatch guides a 22-step mission chain ending in extraction. Mikoyan can be
   left peaceful and does not have to be killed to complete the operation.
 - Minimap, objective marker, health/ammunition/stamina, boss indicators,
@@ -37,6 +45,22 @@ Roblox Studio. It does not connect to a Roblox server or provide multiplayer.
   [VOICE_RECORDING_GUIDE.md](VOICE_RECORDING_GUIDE.md) includes the recording script.
 - Independent music and voice toggles, plus High/Balanced graphics settings.
   Balanced reduces rain and shadows for less powerful devices.
+- High adds contact ambient occlusion, antialiasing and restrained grading;
+  damp materials, cloth, barriers and flashlight moisture scattering add depth.
+
+## Execution viewer file
+
+[Open the standalone viewer](https://t4chimera.github.io/ProjectChernobyl/execution-viewer.html).
+Save that page as an HTML file to keep an offline copy. A local production build
+also writes **`build/ExecutionViewer.html`**: open it in a current desktop browser,
+then press OPEN EXECUTION VIEWER. Geometry, animation, textures, sounds, controls
+and source credits are bundled in that one file. No local server is required.
+
+The viewer and gameplay use the same 20 clips. Seeking pauses playback and sound;
+Replay starts a new performance. Character speech is still waiting for supplied
+voice recordings. Screams/pain sounds are licensed nonverbal performances.
+This browser animation preview guides later Studio asset work; it is not an
+uploaded Roblox Animation asset. See the R6 handoff guide for that workflow.
 
 Boss HP, exact names, voice text, and execution timeline data are exported from
 the existing Luau modules into `web/src/canon.js`. A full new run resets bosses

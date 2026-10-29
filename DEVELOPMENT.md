@@ -1,5 +1,51 @@
 # Development record
 
+## 2026-10-29 — Execution review, intro, sprinting and rendering
+
+- Authored 20 distinct continuous paired R6 performances with root/joint motion,
+  grabs, anticipation, readable holds, weapon handling and follow-through. The
+  canonical variant IDs/source data remain; prototype durations now allow the
+  requested two-second holds. Bodies stay intact with staged camera cutaways.
+- Integrated the same clips into gameplay with local collision-safe staging,
+  once-only sound/blood cues, third-person focus and final victim poses retained
+  until redeployment. Ordinary melee remains available in cramped passages.
+- Added an orbitable baseplate Execution Lab to briefing/pause menus and an
+  independent single-file HTML viewer with play/pause/replay, time seeking,
+  quarter/half speed, looping, embedded recordings and asset credits. The build
+  emits web/dist/execution-viewer.html and build/ExecutionViewer.html (~2.15 MiB).
+- Visual review caught weapon/appendage bounds lifting fallen bodies. Separated
+  humanoid support, equipment floor handling and quaternion body rolls; all 20
+  final torso heights now measure 0.472–0.495 m. Added floor/rest/grip regression
+  checks and kept caller-owned name-tag visibility.
+- Added a credited local SCP emblem, initial black-screen ident with heartbeat
+  and low music, Skip/reduced-motion support, and a covered deployment fade.
+  The first click enables browser audio. No automatic TTS was reintroduced.
+- Increased rifle attack loudness by a measured 9.1 dB versus the previous mix,
+  with ambient ducking and output peak control. Real Chromium OfflineAudioContext
+  checks measured peaks below full scale for rapid and overlapping shot trains.
+- Added three licensed Wildfire Games nonverbal human performances plus two
+  Kenney impact recordings, with pinned provenance/license/modification records.
+  Character dialogue recordings remain pending. Contact blood is bounded and
+  short-lived; no severed parts, exposed wounds or detailed injury effects.
+- Visible sprint strides, foot clearance, torso counterrotation and ground
+  planting now follow actual local movement; infected use an uneven hunched gait
+  and their chase animation. R6's six rigid body parts and grip contacts remain.
+- High graphics now use bounded contact AO/FXAA/grading plus soft depth-tested
+  flashlight moisture scattering. Improved damp surfaces, pitched cloth shelter,
+  sandbags, barriers and puddles; facility fixtures remain off. Fixed incompatible
+  indexed/nonindexed first-person weapon batches discovered by console checks.
+- Validation: all 51 browser/actual-Three tests and production build pass; all
+  36 preserved Luau CLI tests and Rojo build pass. Standalone artifact bytes render
+  in Chromium with all 20/eight-boss variants, grounded intact bodies, 14 decoded
+  recordings, functional controls and zero runtime errors/external requests.
+  Managed Chromium blocks file:// navigation, so this check loads the exact HTML
+  bytes directly. The artifact embeds all required assets. Studio engine and
+  final uploaded Roblox animation-asset acceptance remain pending.
+- Integrated Chromium checks pass for the SCP intro, visible sprint legs, actual
+  recorded firing, radio/mission progression, isolated boss activation, execution,
+  death/respawn, retained progress and 390px layout. High AO/grade/FXAA renders
+  with zero console/runtime errors; real pause-menu Lab access/return also pass.
+
 ## 2026-10-29 — R6 reference models and recorded audio
 
 - Replaced the browser's segmented limbs with six rigid R6 primary parts,

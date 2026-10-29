@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {createAudio} from '../src/audio.js';
+import {SOUND_ASSETS} from '../src/sound-assets.js';
 import {VOICE_LINES, findVoiceRecording} from '../src/voice-manifest.js';
 
 const soundAssets = {
@@ -114,4 +116,84 @@ test('dispose settles queued sample loads and ignores late decode completions',a
   f.held.splice(0).forEach(release=>release());await flush();
   assert.equal(a.getDebugState().samplesLoaded,0);assert.equal(a.getDebugState().pendingDownloads,0);
   assert.equal(f.decodes,0,'closed audio contexts must not decode late network responses');
+});
+
+test('rifle gain dominates the ambient bed, ducks it briefly, and retains output headroom',async()=>{
+  const f=fixture(),a=f.audio;a.start();await a.whenReady();
+  const before=a.getDebugState(),oldNominalShot=.62*.6*.8;
+  assert(before.shotGain*before.mixLevels.effects*before.mixLevels.master*before.mixLevels.output>oldNominalShot*6,
+    'quiet rifle tails need a substantially stronger playback path');
+  assert(before.shotGain*before.mixLevels.effects/before.mixLevels.music>18,
+    'rifle bus must remain well above the slow ambient score');
+  const limiter=f.created.find(node=>node.kind==='compressor');
+  assert.equal(limiter.threshold.value,-3);assert(limiter.ratio.value>=12);assert(limiter.attack.value<=.001);
+  assert(before.mixLevels.master<1,'the master leaves output headroom');
+  const ceiling=f.created.find(node=>node.kind==='distortion'&&node.curve?.length===4096);
+  assert(ceiling&&Math.max(...ceiling.curve)<.93,'loud overlapping peaks have a final soft ceiling');
+  assert(a.shot({own:true}));const active=a.getDebugState();
+  assert(active.scoreDucked);assert.equal(active.mixLevels.musicDuck,.18);
+  for(let i=0;i<8;i++)a.shot({own:true});
+  assert.equal(f.timers.size,1,'rapid fire extends one duck release timer');
+  await f.runTimers();assert.equal(a.getDebugState().scoreDucked,false);assert.equal(a.getDebugState().mixLevels.musicDuck,1);
+  a.dispose();
+});
+
+test('intro heartbeat starts on demand, fades at the end and survives pause without extra schedulers',async()=>{
+  const f=fixture(),a=f.audio;assert.equal(a.getDebugState().initialized,false);
+  assert(a.beginIntro());await a.whenReady();const initial=a.getDebugState();
+  assert(initial.introActive);assert(initial.heartbeatActive);assert(initial.mixLevels.heartbeat>0);
+  assert.equal(initial.transientSources,2,'one original double heartbeat, not a voice imitation');
+  a.beginIntro();assert.equal(a.getDebugState().transientSources,2);assert.equal(f.intervals.size,1);
+  a.stop();assert.equal(a.getDebugState().heartbeatActive,false);assert.equal(a.getDebugState().transientSources,0);
+  a.start();assert(a.getDebugState().heartbeatActive);assert.equal(f.intervals.size,1);
+  a.endIntro();const ended=a.getDebugState();assert.equal(ended.introActive,false);assert.equal(ended.mixLevels.heartbeat,0);
+  assert(ended.mixLevels.music<initial.mixLevels.music);a.endIntro();
+  a.setMix({music:false});a.beginIntro();assert.equal(a.getDebugState().heartbeatActive,false);
+  a.dispose();assert.equal(a.getDebugState().graphNodes,0);assert.equal(f.intervals.size,0);
+});
+
+test('execution cues preload recorded humans, route in space, and clean up on pause and replay',async()=>{
+  const cueAssets={...emptyAssets,executionCues:{
+    pain:[{url:'audio/sfx/human-pain.wav',kind:'human-recording',gain:.8}],
+    scream:[{url:'audio/sfx/human-scream.wav',kind:'human-recording'}],
+    thud:[{url:'audio/sfx/thud.wav',kind:'sampled-foley'}],
+  }};
+  const f=fixture({soundAssets:cueAssets}),a=f.audio;a.start();await a.whenReady();const initial=a.getDebugState();
+  assert.equal(initial.samplesLoaded,3);a.setListener([0,0,0],[0,0,-1]);
+  for(const kind of ['pain','scream','thud'])assert(a.executionCue(kind,{position:[2,0,-2],intensity:.8}));
+  assert.equal(a.getDebugState().sampledExecutionCues,3);assert.equal(a.getDebugState().cueCount,3);
+  assert(f.created.some(node=>node.kind==='pan'&&node.pan.value>0));
+  a.stop();assert.equal(a.getDebugState().transientSources,0);assert.equal(a.executionCue('pain'),false);
+  a.start();await a.whenReady();assert.equal(f.decodes,3,'replay reuses decoded human and Foley samples');
+  assert(a.executionCue('scream',{own:true}));f.finishSamples();assert.equal(a.getDebugState().graphNodes,initial.graphNodes);
+  a.setMix({effects:false});assert.equal(a.executionCue('pain'),false);assert.equal(f.speechCalls,0);a.dispose();
+});
+
+test('unavailable human cues remain silent while procedural movement Foley stays bounded',async()=>{
+  const f=fixture({soundAssets:emptyAssets}),a=f.audio;a.start();await a.whenReady();
+  const initial=a.getDebugState();assert.equal(a.executionCue('pain'),false);assert.equal(a.executionCue('scream'),false);
+  assert.equal(a.getDebugState().sourceCount,initial.sourceCount,'no oscillators may imitate missing human recordings');
+  assert.equal(a.getDebugState().missingHumanCues,2);
+  for(const kind of ['impact','thud','whoosh','grab','cloth-tear','slice'])assert(a.executionCue(kind,{position:[3,0,-1]}));
+  assert.equal(a.getDebugState().fallbackExecutionCues,6);
+  assert.equal(a.executionCue('unknown'),false);assert.equal(a.executionCue('thud',{intensity:0}),false);
+  for(let i=0;i<100;i++)a.executionCue('impact');assert.equal(a.getDebugState().transientSources,20);
+  a.stop();assert.equal(a.getDebugState().transientSources,0);assert.equal(f.timers.size,0);a.dispose();
+});
+
+test('production human and impact samples ship locally with their asset licenses',()=>{
+  const cues=SOUND_ASSETS.executionCues;
+  for(const kind of ['pain','scream','impact','thud']) {
+    assert(cues[kind].length>0,`${kind} must have a shipped recording`);
+    for(const asset of cues[kind]) {
+      const bytes=readFileSync(new URL(`../public/${asset.url.replace(/^\.\//,'')}`,import.meta.url));
+      assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WAVE');
+      assert(bytes.length>1000&&bytes.length<400000,'each local cue stays within the small audio budget');
+      if(kind==='pain'||kind==='scream') {
+        assert.equal(asset.kind,'human-recording');assert.equal(asset.license,'CC-BY-SA-3.0');assert.equal(asset.author,'Wildfire Games');
+      } else assert.equal(asset.license,'CC0-1.0');
+    }
+  }
+  const attribution=readFileSync(new URL('../public/audio/SOURCES.md',import.meta.url),'utf8');
+  assert(attribution.includes('Wildfire Games'));assert(attribution.includes('creativecommons.org/licenses/by-sa/3.0'));
 });

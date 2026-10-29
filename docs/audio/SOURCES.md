@@ -1,8 +1,9 @@
 # Audio sources and licenses
 
 These small files are committed locally and shipped with the game. Runtime audio
-never hotlinks third-party hosts. No voice actors, character recordings, or Roblox
-audio asset IDs are supplied by this pack.
+never hotlinks third-party hosts. Nonverbal human vocalizations are included as
+generic execution effects. Character dialogue performances and Roblox audio
+asset IDs remain unsupplied.
 
 ## Rifle recordings — Still North Media
 
@@ -57,9 +58,77 @@ License evidence: https://github.com/Boyquotes/kenney-impact-sounds-for-godot/bl
 | gear-metal-light.wav | impact_metal_light_000.ogg |
 | gear-metal-latch.wav | impact_metal_medium_001.ogg |
 
-## Edits and verification
+## Nonverbal human vocalizations — Wildfire Games
 
-All production files are mono, 48 kHz, signed 16-bit PCM WAV. The conversion
+`human-pain-01.wav`, `human-scream-01.wav` and `human-scream-02.wav` are
+adapted from the **0 A.D.** project's human death vocalizations. They are
+nonverbal performance samples used for generic prototype pain/scream cues;
+they remain generic samples rather than character dialogue or final character
+voices. The upstream project classifies them as human actor death sounds.
+
+**Original author: Wildfire Games** — http://www.wildfiregames.com/
+
+**License: Creative Commons Attribution-Share Alike 3.0 Unported
+(CC BY-SA 3.0)** — https://creativecommons.org/licenses/by-sa/3.0/
+
+These three modified WAV files are distributed under **CC BY-SA 3.0**, including
+this project's downmixing, filtering, resampling, fades and normalization. This
+asset license applies to these recordings and their modifications. The other
+audio assets retain their individually stated licenses. Preserve this attribution
+and license when redistributing the recordings.
+
+The upstream audio license and redistribution instructions are retained exactly
+in [sfx/Wildfire-Games-LICENSE.txt](sfx/Wildfire-Games-LICENSE.txt).
+
+Pinned official source revision:
+https://github.com/0ad/0ad/tree/61a3b9507d974084e6badb88a0826bd89a6d5b8b/binaries/data/mods/public/audio/actor/human/death
+
+License evidence:
+https://github.com/0ad/0ad/blob/61a3b9507d974084e6badb88a0826bd89a6d5b8b/binaries/data/mods/public/audio/LICENSE.txt
+
+| Local cue file | Unmodified upstream recording | Duration |
+| --- | --- | ---: |
+| human-pain-01.wav | male_death_11.ogg | 1.500 s |
+| human-scream-01.wav | male_death_24.ogg | 2.500 s |
+| human-scream-02.wav | female_death_04.ogg | 2.322 s |
+
+## Execution impacts — Kenney
+
+`body-impact-01.wav` and `body-thud-01.wav` adapt Kenney's **CC0 1.0**
+Impact Sounds Foley from the same pinned mirror and license identified above.
+They provide sampled Foley for staged, stylized body/ground impact cues.
+
+| Local file | Unmodified upstream recording | Duration |
+| --- | --- | ---: |
+| body-impact-01.wav | impact_punch_heavy_000.ogg | 0.649 s |
+| body-thud-01.wav | impact_soft_heavy_000.ogg | 0.527 s |
+
+These five new files were decoded with FFmpeg, passed through a 35 Hz high-pass
+filter, resampled to mono 48 kHz signed 16-bit PCM, given a 25 ms end fade, then
+linearly peak-normalized to at most 0.72 full scale. They total **720,034 bytes**
+(about 703 KiB); no source recording was synthesized.
+
+Source and production SHA-256 hashes for the added recordings:
+
+| Original source file | Source SHA-256 |
+| --- | --- |
+| male_death_11.ogg | `97847ede681046de3a8a059aca1edbb5e66eb9b60159e0c8f30247a8cea5ba5a` |
+| male_death_24.ogg | `92a5fc47c7e42b541a102d6e7c8545b38973859e674c02a3271372744e406cce` |
+| female_death_04.ogg | `305940f89b59ba5282bcc78717bdcfae3a35685684f25fa41cd92f01fb3b9fb0` |
+| impact_punch_heavy_000.ogg | `b33a8f14068aec24ec69ba85e5e87fdc41228975f6a1a3e44a6e7d6fc3d9f8d8` |
+| impact_soft_heavy_000.ogg | `49e7ca88743fca974bb8676ea138b751cfd8f9033b5e7af8736c2a215d6edbc1` |
+
+| Local production file | Production SHA-256 |
+| --- | --- |
+| human-pain-01.wav | `417f69ec594249779617f5982dad2605ed25f6e69eeea7574a534bd9eada2720` |
+| human-scream-01.wav | `e68482bc410af7c2273a862cb8b2bb244a8f8d8186cd6795bb13992773561a23` |
+| human-scream-02.wav | `595d519937963e52362dabb518f60ad8552e68aabd9e971af1e593f0d13b13f4` |
+| body-impact-01.wav | `e83b3ea32350afb009adc297c8af3f4c0724889b9fb3b0638e238b7ac5fa1fdb` |
+| body-thud-01.wav | `f36084cdbd9297bd850107e5d5e48763c4017feb70c4fdb3f56655aaf098f0cf` |
+
+## Original firearm/footstep edits and verification
+
+The original nine production files are mono, 48 kHz, signed 16-bit PCM WAV. Their conversion
 uses FFmpeg's 35 Hz high-pass filter, downmixing and resampling, then linear
 peak normalization and a short fade at the end. The transient and the real
 recorded tail remain intact. No synthetic shot was substituted for a recording.

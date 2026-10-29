@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createActor, animateActor, disposeActor } from './actors.js';
+import { getExecutionClips, sampleExecution, applyExecutionPose, getExecutionCues } from './execution-choreography.js';
 
 const SCALE = 0.25;
 const up = new THREE.Vector3(0, 1, 0);
@@ -11,10 +12,11 @@ const randomItem = array => array[Math.floor(Math.random() * array.length)];
 export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   const gun = canon.Weapon;
   const enemyConfig = canon.Enemies;
+  const executionClips = getExecutionClips(canon);
   const state = {
     hp: 100, maxHp: 100, ammo: gun.MagazineSize, reserve: gun.ReserveAmmo,
     reloading: false, force: 'Nu-7', mode: 'operative', phase: 'briefing',
-    bosses: new Map(), infected: [], deadBosses: new Set(), execution: null,
+    bosses: new Map(), infected: [], deadBosses: new Set(), execution: null, deathExecution: null,
     playerPosition: world.spawn.clone(), kills: 0, bossKills: 0,
   };
   let clock = 0, aiAccumulator = 0, nextFire = 0, reloadUntil = 0;
@@ -218,6 +220,43 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     victimRig.mesh.rotation.y = Math.atan2(-playerData.direction.x, -playerData.direction.z);
   }
 
+  function findExecutionStage(record, clip) {
+    const center = record.position.clone().add(state.playerPosition).multiplyScalar(.5).setY(0);
+    const facing = Math.atan2(record.position.x - state.playerPosition.x, record.position.z - state.playerPosition.z);
+    const samples = clip.keyframes.flatMap((frame, index) => {
+      const next = clip.keyframes[index + 1];
+      return [sampleExecution(clip, frame.at), ...(next ? [sampleExecution(clip, (frame.at + next.at) * .5)] : [])];
+    });
+    // Search a small, local staging footprint. Both complete trajectories and
+    // the entrance paths must fit; a cramped corner simply uses normal melee.
+    const candidates = [[0,0],[.4,0],[-.4,0],[0,.4],[0,-.4],[.7,.4],[-.7,.4],[.7,-.4],[-.7,-.4]];
+    const nearbyBoxes = world.colliders.filter(box => box.max.y >= .38 && box.min.y <= 2.3
+      && box.max.x > center.x - 5 && box.min.x < center.x + 5 && box.max.z > center.z - 5 && box.min.z < center.z + 5);
+    const pointClear = (point, radius) => {
+      const bounds = world.minimap.bounds;
+      return point.x - radius >= bounds.minX + .5 && point.x + radius <= bounds.maxX - .5
+        && point.z - radius >= bounds.minZ + .5 && point.z + radius <= bounds.maxZ - .5
+        && !nearbyBoxes.some(box => point.x + radius > box.min.x && point.x - radius < box.max.x
+          && point.z + radius > box.min.z && point.z - radius < box.max.z);
+    };
+    for (const offset of candidates) for (const turn of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2]) {
+      const origin = center.clone().add(new THREE.Vector3(offset[0], 0, offset[1]).applyAxisAngle(up, facing));
+      const heading = facing + turn;
+      const stagePoint = position => new THREE.Vector3(...position).applyAxisAngle(up, heading).add(origin);
+      const first = samples[0];
+      if (!clearLine(eye(record.position), eye(stagePoint(first.attacker.position)))
+        || !clearLine(eye(state.playerPosition), eye(stagePoint(first.victim.position)))) continue;
+      const safe = samples.every(sample => {
+        const attacker = stagePoint(sample.attacker.position), victim = stagePoint(sample.victim.position);
+        // R6 bodies, held weapons and fallen poses need more space than a walk.
+        return pointClear(attacker, 1.5) && pointClear(victim, 1.4)
+          && inEncounterArea(record, attacker) && distanceXZ(record.home, attacker) <= tetherDistance(record);
+      });
+      if (safe) return { origin, heading };
+    }
+    return null;
+  }
+
   function beginExecution(record) {
     const choices = canon.Executions.Bosses[record.id];
     if (!choices?.length || state.execution || state.mode === 'tour' || clock < immunityUntil) return false;
@@ -225,14 +264,19 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     if (distanceXZ(record.position, state.playerPosition) > canon.Executions.Range * SCALE) return false;
     if (!clearLine(eye(record.position), eye(state.playerPosition))) return false;
     const variant = randomItem(choices);
+    const clip = executionClips.find(item => item.id === variant.Id);
+    const staging = findExecutionStage(record, clip);
+    if (!staging) return false;
     showVictim();
-    record.mesh.rotation.y = Math.atan2(record.position.x - state.playerPosition.x, record.position.z - state.playerPosition.z);
-    victimRig.mesh.rotation.y = Math.atan2(state.playerPosition.x - record.position.x, state.playerPosition.z - record.position.z);
-    state.execution = { attacker: record.mesh, variant: variant.Id, duration: variant.Duration, elapsed: 0,
-      victim: victimRig.mesh, record, timeline: variant.Beats, beatIndex: 0, victimPose: 'Guard' };
+    state.deathExecution = null;
+    state.execution = { attacker: record.mesh, variant: variant.Id, duration: clip.duration, elapsed: 0,
+      victim: victimRig.mesh, record, clip, ...staging, focus: staging.origin.clone().setY(.9), cutaway: false };
     record.state = 'Executing'; record.moving = false; record.moveDestination = null; record.motion.speed = 0;
+    record.pendingHit = null;
+    const initial = applyExecutionPose({ attackerRig: record.rig, victimRig, variant: clip, elapsed: 0, ...staging });
+    state.execution.focus.copy(initial.focus); state.playerPosition.copy(initial.victimPosition);
     speak(record, 'Execution');
-    emit({ type: 'execution-start', variant: variant.Id });
+    emit({ type: 'execution-start', variant: variant.Id, duration: clip.duration });
     return true;
   }
 
@@ -243,6 +287,8 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     execution.record.pose = execution.record.dead ? 'Death' : 'Idle';
     execution.record.state = execution.record.dead ? 'Dead' : 'Search';
     if (completed && state.phase === 'playing') {
+      state.deathExecution = { variant: execution.variant, focus: execution.focus.clone(),
+        victim: execution.victim, origin: execution.origin.clone(), heading: execution.heading };
       state.hp = 0; state.phase = 'dead';
       emit({ type: 'death' });
     } else if (victimRig && state.phase !== 'dead') {
@@ -255,15 +301,19 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     const execution = state.execution;
     if (!execution) return;
     if (execution.record.dead) { endExecution(false); return; }
-    execution.elapsed += dt;
-    while (execution.beatIndex < execution.timeline.length && execution.elapsed >= execution.timeline[execution.beatIndex].At) {
-      const beat = execution.timeline[execution.beatIndex++];
-      execution.record.pose = beat.Pose;
-      execution.victimPose = beat.VictimPose || execution.victimPose;
-      if (beat.Effect === 'Blood') emit({ type: 'blood', position: eye(state.playerPosition).addScaledVector(up, -0.35) });
-      if (beat.Effect === 'Shot') emit({ type: 'shot', origin: eye(execution.record.position), position: eye(state.playerPosition), hit: true, own: false });
+    const previous = execution.elapsed;
+    execution.elapsed = Math.min(execution.duration, execution.elapsed + dt);
+    const applied = applyExecutionPose({ attackerRig: execution.record.rig, victimRig, variant: execution.clip,
+      elapsed: execution.elapsed, origin: execution.origin, heading: execution.heading });
+    execution.focus.copy(applied.focus); execution.cutaway = applied.cutaway;
+    state.playerPosition.copy(applied.victimPosition);
+    for (const cue of getExecutionCues(execution.clip, previous === 0 ? -Number.EPSILON : previous, execution.elapsed)) {
+      const anchorRig = cue.anchor === 'attacker' ? execution.record.rig : victimRig;
+      const position = anchorRig.body.getWorldPosition(new THREE.Vector3()).addScaledVector(up, .1);
+      emit({ type: 'execution-cue', variant: execution.variant, bossId: execution.record.id, ...cue, position,
+        bloodPosition: victimRig.body.getWorldPosition(new THREE.Vector3()).addScaledVector(up, .1),
+        origin: applied.attackerPosition.clone(), target: applied.victimPosition.clone() });
     }
-    animateActor(victimRig, execution.victimPose, clock, dt, false);
     if (execution.elapsed >= execution.duration) endExecution(true);
   }
 
@@ -468,7 +518,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     if (victimRig) { disposeActor(victimRig); victimRig = null; }
     records = []; hazards = []; pendingRespawns = []; state.bosses.clear(); state.infected = [];
     completedInteractions.clear();
-    state.deadBosses.clear(); state.kills = 0; state.bossKills = 0; state.execution = null;
+    state.deadBosses.clear(); state.kills = 0; state.bossKills = 0; state.execution = null; state.deathExecution = null;
     state.hp = 100; state.ammo = gun.MagazineSize; state.reserve = gun.ReserveAmmo; state.reloading = false;
     state.phase = 'briefing'; clock = 0; nextFire = 0; reloadUntil = 0; immunityUntil = 0;
     lastHurt = -100; lastNoise = -100; nextPathJob = 0; aiAccumulator = 0;
@@ -524,6 +574,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
 
   function respawn() {
     if (state.execution) endExecution(false);
+    state.deathExecution = null;
     state.hp = 100; state.ammo = gun.MagazineSize; state.reserve = gun.ReserveAmmo;
     state.reloading = false; reloadUntil = 0; state.phase = 'playing'; immunityUntil = clock + 3;
     state.playerPosition.copy(world.spawn); lastHurt = clock;
@@ -610,12 +661,16 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       let pose = record.dead ? 'Death' : record.pose;
       if (!record.dead && state.execution?.record !== record && clock >= record.poseUntil && record.pose !== 'Sit') pose = record.moving ? 'Walk' : 'Idle';
       if (record.id === 'Mikoyan' && record.state === 'Peaceful') pose = 'Sit';
-      animateActor(record.rig, pose, clock, dt, record.moving, record.motion);
+      if(record.id==='Infected'){
+        record.motion.sprinting=record.moving&&record.state==='Chase';
+        if(pose==='Walk'&&record.motion.sprinting)pose='Run';
+      }
+      if (state.execution?.record !== record) animateActor(record.rig, pose, clock, dt, record.moving, record.motion);
       if (record.rig.tag) record.rig.tag.visible = !record.dead && distanceXZ(record.position, state.playerPosition) < 24;
     }
     records = records.filter(record => !(record.disposed && !record.boss));
     state.infected = state.infected.filter(record => !record.disposed);
-    if (victimRig && state.phase === 'dead') animateActor(victimRig, 'Death', clock, dt);
+    if (victimRig && state.phase === 'dead' && !state.deathExecution) animateActor(victimRig, 'Death', clock, dt);
   }
 
   function dispose() {

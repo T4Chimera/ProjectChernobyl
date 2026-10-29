@@ -2,3 +2,4 @@
 GAME_DESIGN.md -text
 # Production bundles contain upstream shader strings and are generated from web/.
 docs/assets/* linguist-generated=true
+docs/execution-viewer.html linguist-generated=true -diff

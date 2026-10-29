@@ -108,3 +108,24 @@ Chromium+pythonPlaywrightavailable. Npmtoolinstall parenthandles.
   `whenReady()` support spatial playback and decoded-sample verification.
   Debug state includes samplesLoaded/samplesFailed/sampleShots/fallbackShots,
   voiceMode='recorded-only' and recordedVoiceMode=true.
+
+## Browser 0.5 additions
+
+- `execution-choreography.js` exports `getExecutionClips(canon)`,
+  `sampleExecution(clipOrId,time)`, `applyExecutionPose({attackerRig,victimRig,
+  variant,elapsed,origin,heading})` and `getExecutionCues(clip,previous,time)`.
+  The 20 IDs retain their canonical source metadata; authored durations allow
+  anticipation, two-second holds and follow-through. Body joints stay rigid R6.
+- Execution state adds `clip`, `origin`, `heading`, `focus` and `cutaway`.
+  `deathExecution` retains the final victim pose until respawn. Gameplay emits
+  `execution-cue` with kind/intensity/position and optional blood/bloodPosition.
+  Execution gunfire uses that cue channel to avoid duplicate shot audio.
+- `execution-preview.js` uses that same library on a neutral baseplate. The
+  production build also emits a single `execution-viewer.html` with bundled code,
+  generated textures, data-URL recordings and credits, plus a local copy in build/.
+- `intro.js` gates the ident on a user gesture, calls audio `beginIntro/endIntro`,
+  and covers deployment with a fade. `executionCue` handles staged sound contacts.
+- `render-pipeline.js` applies bounded High contact AO/grade/FXAA, with a direct
+  Balanced path. Atmosphere accepts `setFlashlight(light)` for moisture scattering.
+- `animateActor` motion accepts speed/distance/heading/sprinting/grounded. The
+  local first-person lower body receives actual measured movement each frame.

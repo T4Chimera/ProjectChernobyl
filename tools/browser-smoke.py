@@ -25,6 +25,11 @@ with sync_playwright() as p:
     page.on("pageerror", lambda error: errors.append(str(error)))
     separator = "&" if "?" in args.url else "?"
     page.goto(args.url + separator + "test", wait_until="networkidle")
+    page.get_by_role("button",name="BEGIN",exact=True).click()
+    page.wait_for_function("__chernobyl.audio.getDebugState().introActive")
+    assert page.evaluate("__chernobyl.intro.isActive")
+    page.get_by_role("button",name="SKIP INTRO",exact=False).click()
+    page.wait_for_function("!__chernobyl.intro.isActive")
     page.get_by_role("button", name="DEPLOY TO THE ZONE", exact=False).wait_for()
     page.screenshot(path=str(output / "intro.png"))
     page.locator(f'.intro-screen [data-quality="{args.quality}"]').click()
@@ -40,12 +45,15 @@ with sync_playwright() as p:
     assert audio["samplesLoaded"] > 0 and audio["samplesFailed"] == 0, audio
     assert audio["voiceMode"] == "recorded-only" and page.evaluate("__ttsCalls") == 0
     before = page.evaluate("__chernobyl.player.position.x")
+    page.evaluate("{const p=__chernobyl.player.position;__chernobyl.lookAt([p.x+5,.2,p.z]);}")
     page.keyboard.down("Shift")
     page.keyboard.down("w")
     page.wait_for_function(f"__chernobyl.player.position.x > {before + .5}", timeout=20000)
     during = page.evaluate("__chernobyl.stamina")
+    assert page.evaluate("__chernobyl.firstPersonBody.mesh.visible && __chernobyl.firstPersonBody.locomotion.runBlend>.2 && __chernobyl.firstPersonBody.locomotion.phase>.1"), "Visible sprint legs did not animate"
     page.keyboard.up("w")
     page.keyboard.up("Shift")
+    page.evaluate("{const p=__chernobyl.player.position;__chernobyl.lookAt([p.x+10,1.8,p.z]);}")
     assert during < 100, "Sprinting did not consume stamina"
     assert page.evaluate("__chernobyl.game.state.hp") == 100
     page.screenshot(path=str(output / "playing.png"))
@@ -97,7 +105,7 @@ with sync_playwright() as p:
     }""")
     page.wait_for_function("__chernobyl.game.state.execution && __chernobyl.cameraMode === 'execution'", timeout=20000)
     page.screenshot(path=str(output / "execution.png"))
-    page.evaluate("for(let i=0;i<45;i++)__chernobyl.game.update(.1,__chernobyl.player)")
+    page.evaluate("for(let i=0;i<65;i++)__chernobyl.game.update(.1,__chernobyl.player)")
     page.wait_for_function("__chernobyl.game.state.phase === 'dead' && __chernobyl.cameraMode === 'third-person-death'")
     page.get_by_role("button", name="REDEPLOY AT CHECKPOINT", exact=False).click()
     page.wait_for_function("__chernobyl.game.state.hp===100 && __chernobyl.cameraMode==='first-person' && !__chernobyl.paused")
@@ -110,6 +118,8 @@ with sync_playwright() as p:
     mobile = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
     mobile.on("pageerror", lambda error: errors.append(str(error)))
     mobile.goto(args.url, wait_until="networkidle")
+    mobile.get_by_role("button",name="BEGIN",exact=True).click()
+    mobile.get_by_role("button",name="SKIP INTRO",exact=False).click()
     assert mobile.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Mobile horizontal overflow"
     mobile.get_by_role("button", name="DEPLOY TO THE ZONE", exact=False).scroll_into_view_if_needed()
     mobile.screenshot(path=str(output / "mobile.png"))

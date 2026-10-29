@@ -16,6 +16,12 @@ const mixValue = value => typeof value === 'boolean' ? Number(value) : Number.is
 const vector = value => Array.isArray(value) ? value : [value?.x || 0, value?.y || 0, value?.z || 0];
 const validAsset = asset => typeof asset === 'string' ? { url: asset, gain: 1 } : asset;
 const MAX_TRANSIENTS = 20, MAX_DOWNLOADS = 3, MAX_CACHE = 64;
+// Rifle sources have short peaks and quiet natural tails. Give those peaks room
+// in the final limiter, raise their body, and keep the score behind action.
+const LEVELS = Object.freeze({ master: .82, output: .86, music: .14, introMusic: .2, effects: .86,
+  voice: .8, shot: 3.2, heartbeat: .58, shotDuck: .18 });
+const CUE_GAINS = Object.freeze({ impact: 1.25, thud: 1.15, whoosh: .65, grab: .65,
+  'cloth-tear': .7, slice: .7, pain: .95, scream: 1.05 });
 
 export function createAudio(environment = globalThis, options = {}) {
   const host = environment.window || environment;
@@ -26,17 +32,23 @@ export function createAudio(environment = globalThis, options = {}) {
   const loading = new Set();
   const timers = new Set(), downloads = [], voiceQueue = [], lastBySpeaker = new Map();
   const mix = { music: 1, voice: 1, effects: 1 }, gains = [];
-  const stats = { sampleShots: 0, fallbackShots: 0, recordedLinesPlayed: 0 };
-  let ctx = null, master = null, music = null, effects = null, voiceBus = null, humFilter = null, room = null;
+  const stats = { sampleShots: 0, fallbackShots: 0, recordedLinesPlayed: 0,
+    executionCues: 0, sampledExecutionCues: 0, fallbackExecutionCues: 0, missingHumanCues: 0 };
+  let ctx = null, master = null, music = null, musicDuck = null, heartbeat = null, effects = null, voiceBus = null, humFilter = null, room = null;
   let noise = null, started = false, enabled = true, disposed = false, tension = 0;
   let scheduler = null, nextNoteAt = 7, noteIndex = 0, activeDownloads = 0, shotIndex = 0, footIndex = 0;
   let voiceGeneration = 0, speaking = null, voiceLoading = false;
+  let introActive = false, nextHeartbeatAt = 0, duckTimer = null, ducked = false, cueIndex = 0;
   let listener = [0, 0, 0], forward = [0, 0, -1], preloaded = [];
   const interval = (fn, delay) => (host.setInterval || setInterval)(fn, delay);
   const clearIntervalSafe = id => (host.clearInterval || clearInterval)(id);
   const later = (fn, delay) => {
     const id = (host.setTimeout || setTimeout)(() => { timers.delete(id); fn(); }, delay);
     timers.add(id); return id;
+  };
+  const cancelTimer = id => {
+    if (id === null) return;
+    (host.clearTimeout || clearTimeout)(id); timers.delete(id);
   };
   const keep = node => { nodes.add(node); return node; };
   function target(parameter, value, seconds = .18) {
@@ -70,7 +82,8 @@ export function createAudio(environment = globalThis, options = {}) {
 
   function assetList() {
     return [...(assets.rifleShots || []), ...(assets.reload || []),
-      ...Object.values(assets.footsteps || {}).flat()].map(validAsset).filter(item => item?.url);
+      ...Object.values(assets.footsteps || {}).flat(),
+      ...Object.values(assets.executionCues || {}).flat()].map(validAsset).filter(item => item?.url);
   }
   function runDownloads() {
     while (!disposed && activeDownloads < MAX_DOWNLOADS && downloads.length) {
@@ -194,13 +207,27 @@ export function createAudio(environment = globalThis, options = {}) {
     if (!Audio) return false;
     try { ctx = new Audio(); } catch { return false; }
     const limiter = keep(ctx.createDynamicsCompressor());
-    limiter.threshold.value = -16; limiter.knee.value = 14; limiter.ratio.value = 5;
-    limiter.attack.value = .003; limiter.release.value = .21;
+    limiter.threshold.value = -3; limiter.knee.value = 2; limiter.ratio.value = 16;
+    limiter.attack.value = .001; limiter.release.value = .12;
     master = keep(ctx.createGain()); master.gain.value = 0;
-    music = keep(ctx.createGain()); effects = keep(ctx.createGain()); voiceBus = keep(ctx.createGain());
-    music.gain.value = 0; effects.gain.value = .6; voiceBus.gain.value = .8;
-    master.connect(limiter); limiter.connect(ctx.destination);
-    music.connect(master); effects.connect(master); voiceBus.connect(master);
+    music = keep(ctx.createGain()); musicDuck = keep(ctx.createGain()); heartbeat = keep(ctx.createGain());
+    effects = keep(ctx.createGain()); voiceBus = keep(ctx.createGain());
+    music.gain.value = 0; musicDuck.gain.value = 1; heartbeat.gain.value = 0;
+    effects.gain.value = LEVELS.effects; voiceBus.gain.value = LEVELS.voice;
+    master.connect(limiter);
+    const output = keep(ctx.createGain()); output.gain.value = LEVELS.output; limiter.connect(output);
+    if (ctx.createWaveShaper) {
+      // The compressor is not a hard ceiling: its attack and automatic makeup
+      // gain can overshoot. Preserve quiet signals and soften only loud peaks.
+      const ceiling = keep(ctx.createWaveShaper()), curve = new Float32Array(4096);
+      for (let i = 0; i < curve.length; i++) {
+        const x = i / (curve.length - 1) * 2 - 1, magnitude = Math.abs(x);
+        curve[i] = Math.sign(x) * (magnitude <= .8 ? magnitude : .8 + .15 * (1 - Math.exp(-(magnitude - .8) / .15)));
+      }
+      ceiling.curve = curve; ceiling.oversample = '2x'; output.connect(ceiling); ceiling.connect(ctx.destination);
+    } else output.connect(ctx.destination);
+    music.connect(musicDuck); musicDuck.connect(master); heartbeat.connect(master);
+    effects.connect(master); voiceBus.connect(master);
     noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 2.6), ctx.sampleRate);
     const samples = noise.getChannelData(0);
     let seed = 1986, smooth = 0;
@@ -237,34 +264,59 @@ export function createAudio(environment = globalThis, options = {}) {
   }
   function updateMix() {
     if (!ctx) return;
-    target(master.gain, enabled ? .62 : 0, .1);
-    target(music.gain, enabled ? mix.music * (.24 + tension * .035) : 0, .6);
-    target(effects.gain, mix.effects * .6, .1); target(voiceBus.gain, mix.voice * .8, .1);
+    target(master.gain, enabled ? LEVELS.master : 0, .1);
+    target(music.gain, enabled ? mix.music * ((introActive ? LEVELS.introMusic : LEVELS.music) + tension * .025) : 0, .6);
+    target(musicDuck.gain, ducked ? LEVELS.shotDuck : 1, .025);
+    target(heartbeat.gain, enabled && introActive ? mix.music * LEVELS.heartbeat : 0, .3);
+    target(effects.gain, mix.effects * LEVELS.effects, .1); target(voiceBus.gain, mix.voice * LEVELS.voice, .1);
   }
-  function tone(frequency = 330, duration = .09, type = 'sine', volume = .2, destination = effects) {
+  function duckScore() {
+    ducked = true; cancelTimer(duckTimer); target(musicDuck.gain, LEVELS.shotDuck, .008);
+    duckTimer = later(() => { duckTimer = null; ducked = false; target(musicDuck.gain, 1, .18); }, 260);
+  }
+  function tone(frequency = 330, duration = .09, type = 'sine', volume = .2, destination = effects, delay = 0) {
     if (!playable() || !destination || (destination === effects && !mix.effects) || transients.size >= MAX_TRANSIENTS) return false;
     const oscillator = keep(ctx.createOscillator()), gain = keep(ctx.createGain());
     oscillator.type = type; oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(Math.max(.0001, volume), ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + duration);
-    oscillator.connect(gain); gain.connect(destination); source(oscillator, ctx.currentTime + duration + .02, [gain], null, true); return true;
+    const at = ctx.currentTime + delay;
+    gain.gain.setValueAtTime(Math.max(.0001, volume), at); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    oscillator.connect(gain); gain.connect(destination); source(oscillator, at + duration + .02, [gain], null, true, at); return true;
   }
-  function noiseBurst(duration, frequency, volume, delay = 0) {
+  function noiseBurst(duration, frequency, volume, delay = 0, spatial = {}) {
     if (!effectRoom()) return false;
     const node = keep(ctx.createBufferSource()), filter = keep(ctx.createBiquadFilter()), gain = keep(ctx.createGain());
-    node.buffer = noise; filter.type = 'lowpass'; filter.frequency.value = frequency;
-    gain.gain.setValueAtTime(.0001, ctx.currentTime); gain.gain.setValueAtTime(Math.max(.0001, volume), ctx.currentTime + delay);
+    const environment = acoustic(spatial), cleanup = [filter,gain];
+    node.buffer = noise; filter.type = 'lowpass'; filter.frequency.value = Math.min(frequency, environment.cutoff);
+    gain.gain.setValueAtTime(.0001, ctx.currentTime); gain.gain.setValueAtTime(Math.max(.0001, volume * environment.attenuation), ctx.currentTime + delay);
     gain.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + delay + duration);
-    node.connect(filter); filter.connect(gain); gain.connect(effects);
-    source(node, ctx.currentTime + delay + duration + .02, [filter,gain], null, true); return true;
+    node.connect(filter); filter.connect(gain);
+    if (ctx.createStereoPanner && environment.pan) {
+      const pan = keep(ctx.createStereoPanner()); pan.pan.value = environment.pan;
+      gain.connect(pan); pan.connect(effects); cleanup.push(pan);
+    } else gain.connect(effects);
+    if (room && environment.wet) {
+      const wet = keep(ctx.createGain()); wet.gain.value = environment.wet;
+      gain.connect(wet); wet.connect(room); cleanup.push(wet);
+    }
+    source(node, ctx.currentTime + delay + duration + .02, cleanup, null, true); return true;
+  }
+  function heartbeatPair() {
+    if (!playable() || !introActive || !mix.music) return;
+    // Original low percussion, not a claimed recording of a human heartbeat.
+    tone(48, .19, 'sine', .29, heartbeat);
+    tone(41, .15, 'sine', .2, heartbeat, .24);
+    nextHeartbeatAt = ctx.currentTime + 1.15;
   }
   function scheduleScore() {
     if (scheduler !== null) return;
     scheduler = interval(() => {
-      if (!playable() || !mix.music || ctx.currentTime < nextNoteAt) return;
+      if (!playable() || !mix.music) return;
+      if (introActive && ctx.currentTime >= nextHeartbeatAt) heartbeatPair();
+      if (ctx.currentTime < nextNoteAt) return;
       const notes = [196,174.614,146.832,130.812,155.563,98], note = notes[noteIndex++ % notes.length];
-      tone(note, 4.5, 'sine', .035, music); tone(note * 2.997, 2.3, 'sine', .006, music);
-      nextNoteAt = ctx.currentTime + 8 + ((noteIndex * 7) % 6);
-    }, 1000);
+      tone(note, introActive ? 6 : 4.5, 'sine', .035, music); tone(note * 2.997, 2.3, 'sine', .006, music);
+      nextNoteAt = ctx.currentTime + (introActive ? 11 : 8) + ((noteIndex * 7) % 6);
+    }, 250);
   }
   const api = {
     start() {
@@ -274,6 +326,13 @@ export function createAudio(environment = globalThis, options = {}) {
       try { ctx.resume()?.catch?.(() => {}); } catch { /* Await another user gesture. */ }
       updateMix(); scheduleScore(); preloaded = preload(); pumpVoice();
     },
+    beginIntro() {
+      if (disposed) return false;
+      const wasActive = introActive; introActive = true; api.start();
+      if (!wasActive && ctx) { nextNoteAt = ctx.currentTime + .35; heartbeatPair(); }
+      updateMix(); return !!ctx;
+    },
+    endIntro() { introActive = false; updateMix(); },
     setEnabled(value) { enabled = !!value; updateMix(); if (!enabled) cancelVoice(); },
     setMix(patch = {}) {
       for (const key of ['music','voice','effects']) if (patch[key] !== undefined) mix[key] = mixValue(patch[key]);
@@ -289,14 +348,42 @@ export function createAudio(environment = globalThis, options = {}) {
     tone,
     shot(spatial = {}) {
       if (!effectRoom()) return false;
+      const intensity = Number.isFinite(spatial.intensity) ? Math.max(0, Math.min(1.5, spatial.intensity)) : 1;
+      if (!intensity) return false;
       const asset = readyAsset(assets.rifleShots, shotIndex++);
       if (asset) {
-        const result = playBuffer(asset, { gain: .8, rate: .99 + (shotIndex % 5) * .005, spatial });
-        if (result) stats.sampleShots++; return !!result;
+        const result = playBuffer(asset, { gain: LEVELS.shot * intensity, rate: .99 + (shotIndex % 5) * .005, spatial });
+        if (result) { stats.sampleShots++; duckScore(); } return !!result;
       }
-      const response = acoustic(spatial); stats.fallbackShots++;
-      noiseBurst(.055, Math.min(11000, response.cutoff), .75 * response.attenuation);
-      noiseBurst(.2, 750, .4 * response.attenuation, .015); return true;
+      stats.fallbackShots++; duckScore();
+      noiseBurst(.055, 11000, 1.5 * intensity, 0, spatial);
+      noiseBurst(.2, 750, .7 * intensity, .015, spatial); return true;
+    },
+    executionCue(kind, { position, intensity = 1, indoor = true, own = false } = {}) {
+      if (kind === 'gunshot') {
+        const result = api.shot({ position, intensity, indoor, own });
+        if (result) stats.executionCues++; return result;
+      }
+      if (!effectRoom() || !Object.hasOwn(CUE_GAINS, kind)) return false;
+      intensity = Number.isFinite(intensity) ? Math.max(0, Math.min(1.5, intensity)) : 1;
+      if (!intensity) return false;
+      const spatial = { position, intensity, indoor, own };
+      const asset = readyAsset(assets.executionCues?.[kind], cueIndex++);
+      if (asset) {
+        const result = playBuffer(asset, { gain: CUE_GAINS[kind] * intensity, spatial });
+        if (result) { stats.executionCues++; stats.sampledExecutionCues++; }
+        return !!result;
+      }
+      // A missing actor scream/pain recording stays silent. Nonverbal movement
+      // Foley has an explicitly procedural fallback while samples load.
+      if (kind === 'pain' || kind === 'scream') { stats.missingHumanCues++; return false; }
+      const [duration, cutoff, level] = {
+        impact: [.13, 900, .8], thud: [.2, 340, 1], whoosh: [.2, 1800, .23],
+        grab: [.12, 750, .3], 'cloth-tear': [.26, 3800, .34], slice: [.09, 4800, .28],
+      }[kind];
+      const result = noiseBurst(duration, cutoff, level * intensity, 0, spatial);
+      if (result) { stats.executionCues++; stats.fallbackExecutionCues++; }
+      return result;
     },
     hurt() { noiseBurst(.14, 490, .2); noiseBurst(.07, 170, .18); },
     radio() { noiseBurst(.06, 2600, .065); noiseBurst(.04, 1900, .04, .1); },
@@ -333,6 +420,8 @@ export function createAudio(environment = globalThis, options = {}) {
     whenReady() { return Promise.all(preloaded); },
     stop() {
       started = false; cancelVoice();
+      cancelTimer(duckTimer); duckTimer = null; ducked = false;
+      if (musicDuck) target(musicDuck.gain, 1, .01);
       for (const record of [...transients]) stopRecord(record);
       if (scheduler !== null) { clearIntervalSafe(scheduler); scheduler = null; }
       try { ctx?.suspend()?.catch?.(() => {}); } catch { /* Closed context. */ }
@@ -340,6 +429,7 @@ export function createAudio(environment = globalThis, options = {}) {
     dispose() {
       if (disposed) return;
       api.stop(); disposed = true;
+      introActive = false;
       downloads.splice(0).forEach(entry => { entry.state = 'failed'; entry.resolve(null); });
       for (const entry of loading) { entry.controller?.abort(); entry.resolve(null); }
       loading.clear(); activeDownloads = 0;
@@ -357,7 +447,12 @@ export function createAudio(environment = globalThis, options = {}) {
         musicActive: !!ctx && ctx.state === 'running' && started && enabled && mix.music > 0,
         samplesLoaded: states.filter(entry => entry.state === 'ready').length,
         samplesFailed: states.filter(entry => entry.state === 'failed').length,
-        pendingDownloads: downloads.length + activeDownloads, ...stats, mix: { ...mix }, tension };
+        pendingDownloads: downloads.length + activeDownloads, ...stats, cueCount: stats.executionCues,
+        shotGain: LEVELS.shot, introActive, heartbeatActive: introActive && playable() && mix.music > 0,
+        scoreDucked: ducked, mixLevels: { master: master?.gain.value ?? 0, output: LEVELS.output,
+          music: music?.gain.value ?? 0, musicDuck: musicDuck?.gain.value ?? 1,
+          heartbeat: heartbeat?.gain.value ?? 0, effects: effects?.gain.value ?? 0,
+          voice: voiceBus?.gain.value ?? 0 }, mix: { ...mix }, tension };
     },
   };
   return api;

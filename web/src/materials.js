@@ -19,6 +19,7 @@ function smooth(x,y,seed,frequency) {
 
 export function createSurface(kind, seed=1986, size=512) {
   const color=new Uint8Array(size*size*4),roughness=new Uint8Array(size*size*4);
+  const wetness=kind==='asphalt'?new Uint8Array(size*size*4):null;
   const normal=new Uint8Array(size*size*4),height=new Float32Array(size*size);
   for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
     const i=y*size+x,index=i*4,grain=hash(x,y,seed),cloud=smooth(x/size,y/size,seed,8);
@@ -28,21 +29,22 @@ export function createSurface(kind, seed=1986, size=512) {
     if(kind==='brick') {
       // A four-metre tile now contains ordinary 25cm masonry rather than the
       // previous half-metre blocks. Thin recessed mortar catches grazing light.
-      const row=Math.floor(y/16),bx=(x+(row%2)*16)%32,by=y%16;
-      const mortar=bx<1.1||by<1.1,edge=Math.min(bx,32-bx,by,16-by);
+      const row=Math.floor(y/8),bx=(x+(row%2)*16)%32,by=y%8;
+      const mortar=bx<.9||by<.85,edge=Math.min(bx,32-bx,by,8-by);
       const brick=hash(Math.floor((x+(row%2)*16)/32),row,seed);
       const verticalStain=smooth(x/size,y/size,seed+4,21)*smooth(x/size,.1,seed+2,14);
       const chip=grain>.984&&edge<3;
-      shade=(mortar?102:136+brick*23)+(grain-.5)*20+(cloud-.5)*22-verticalStain*30-(chip?21:0);
-      h=mortar?.06:.17+Math.min(edge/4,1)*.04+(grain-.5)*.025-(chip?.035:0);
-      r=mortar?.98:.89;rgb=[1,.987,.955];
+      const kiln=smooth(x/size,y/size,seed+20,31);
+      shade=(mortar?109:140+brick*34)+(grain-.5)*17+(cloud-.5)*27-verticalStain*33-(chip?26:0)+(kiln-.5)*15;
+      h=mortar?.035:.13+Math.min(edge/2,1)*.035+(grain-.5)*.018-(chip?.03:0);
+      r=mortar?.98:.8+brick*.11;rgb=[1,.996,.975];
     } else if(kind==='asphalt') {
-      const puddle=smooth(x/size,y/size,seed+3,5)>.57;
+      const puddle=smooth(x/size,y/size,seed+3,5)>.54;
       const aggregate=hash(Math.floor(x/2),Math.floor(y/2),seed+12);
       const crack=Math.abs(x-size*.43-Math.sin(y*.044)*8-Math.sin(y*.12)*2)<.75&&y<size*.74;
       shade=84+(grain-.5)*22+(cloud-.5)*22+(aggregate>.9?20:0)-(puddle?17:0)-(crack?29:0);
       h=grain*.024+cloud*.024+(aggregate>.9?.012:0)-(crack?.04:0);
-      r=puddle?.17:.75;rgb=[.98,1,1.01];
+      r=puddle?.2:.72+aggregate*.15;rgb=[.98,1,1.01];
     } else if(kind==='metal') {
       const scratch=(hash(Math.floor(x/11),y,seed)>.991)?21:0;
       const brush=hash(x,0,seed+9)*3;
@@ -78,7 +80,8 @@ export function createSurface(kind, seed=1986, size=512) {
     const pores=grain>.986?-.09:0;height[i]=h+pores;
     for(let c=0;c<3;c++)color[index+c]=Math.max(0,Math.min(255,shade*rgb[c]));
     color[index+3]=255;
-    roughness[index]=roughness[index+1]=roughness[index+2]=Math.round(r*255);roughness[index+3]=255;
+    roughness[index]=roughness[index+1]=roughness[index+2]=Math.round(THREE.MathUtils.clamp(r,0,1)*255);roughness[index+3]=255;
+    if(wetness){wetness[index]=wetness[index+1]=wetness[index+2]=r<.3?255:38;wetness[index+3]=255;}
   }
   for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
     const i=(y*size+x)*4;
@@ -94,15 +97,19 @@ export function createSurface(kind, seed=1986, size=512) {
     map.magFilter=THREE.LinearFilter;map.minFilter=THREE.LinearMipmapLinearFilter;
     map.generateMipmaps=true;map.anisotropy=4;map.needsUpdate=true;return map;
   }
-  return {map:texture(color,THREE.SRGBColorSpace),normalMap:texture(normal),roughnessMap:texture(roughness)};
+  return {map:texture(color,THREE.SRGBColorSpace),normalMap:texture(normal),roughnessMap:texture(roughness),...(wetness?{clearcoatMap:texture(wetness)}:{})};
 }
 
 export function createIndustrialMaterials() {
-  const brick=createSurface('brick'),concrete=createSurface('concrete',124),asphalt=createSurface('asphalt',26),metal=createSurface('metal',84),paint=createSurface('paint',41),timber=createSurface('wood',91);
+  const brick=createSurface('brick'),concrete=createSurface('concrete',124),asphalt=createSurface('asphalt',26),metal=createSurface('metal',84),paint=createSurface('paint',41),timber=createSurface('wood',91),fabric=createSurface('fabric',79),rubber=createSurface('rubber',13);
   const surface=(color,maps,metalness,roughness)=>new THREE.MeshStandardMaterial({color,...maps,metalness,roughness,normalScale:new THREE.Vector2(.55,.55)});
+  const road=new THREE.MeshPhysicalMaterial({color:0xa0a7a6,...asphalt,metalness:.015,roughness:.94,normalScale:new THREE.Vector2(.4,.4),clearcoat:.65,clearcoatRoughness:.18});
+  // Woven equipment and bagged sand have their own response; painted sheet
+  // steel, wood and cloth no longer share a single uniform olive surface.
+  const tarp=surface(0x616959,fabric,0,.98);tarp.side=THREE.DoubleSide;
   return {
     concrete:surface(0xc1c0b4,concrete,.04,.94),
-    brick:surface(0xa1a59c,brick,.03,.95),
+    brick:surface(0xb7bab6,brick,.015,.95),
     lowerWall:surface(0x53615c,paint,.03,.85),
     steel:surface(0x737a76,metal,.68,.5),
     iron:surface(0x363c3b,metal,.72,.58),
@@ -111,14 +118,16 @@ export function createIndustrialMaterials() {
     yellow:surface(0xb19b5b,paint,.12,.81),
     green:surface(0x59644c,paint,.15,.8),
     wood:surface(0x766049,timber,.01,.98),
-    asphalt:surface(0x8c9491,asphalt,.035,.83),
+    asphalt:road,
+    fabric:tarp,
+    sandbag:surface(0x8b8672,fabric,0,1),
     blue:surface(0x526268,metal,.4,.65),
     paper:new THREE.MeshStandardMaterial({color:0xbab7a5,roughness:.97}),
     deadTube:new THREE.MeshStandardMaterial({color:0x69706c,roughness:.6}),
     whitePaint:surface(0xc1c4b9,paint,.02,.9),
     cautionMat:new THREE.MeshBasicMaterial({color:0xb39e60,transparent:true,opacity:.48}),
-    glass:new THREE.MeshStandardMaterial({color:0x1b292a,metalness:.65,roughness:.13}),
-    rubber:new THREE.MeshStandardMaterial({color:0x131817,roughness:.94}),
+    glass:new THREE.MeshPhysicalMaterial({color:0x23302f,metalness:.05,roughness:.22,clearcoat:1,clearcoatRoughness:.09}),
+    rubber:surface(0x282c2a,rubber,0,.98),
   };
 }
 

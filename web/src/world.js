@@ -33,7 +33,7 @@ export function createWorld(scene, canon) {
   const interactables = [];
   const animated = [];
   const geometry = new Map();
-  const {concrete,brick,lowerWall,steel,iron,rust,black,yellow,green,wood,paper,blue,deadTube,asphalt,cautionMat,whitePaint,glass,rubber}=createIndustrialMaterials();
+  const {concrete,brick,lowerWall,steel,iron,rust,black,yellow,green,wood,paper,blue,deadTube,asphalt,cautionMat,whitePaint,glass,rubber,fabric,sandbag}=createIndustrialMaterials();
   const grime=new THREE.MeshBasicMaterial({map:createGrimeMap(),color:0x111615,transparent:true,opacity:.58,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1});
 
   function grimePatch(position,width,height,angle=0) {
@@ -510,9 +510,16 @@ export function createWorld(scene, canon) {
   }
 
   function jerseyBarrier(x,z,length=2.2) {
-    box('JerseyBarrierBase',[.8,.22,length],[x,.11,z],concrete);
-    box('JerseyBarrierBody',[.53,.72,length-.14],[x,.5,z],concrete,true);
-    box('JerseyBarrierTop',[.33,.14,length-.2],[x,.92,z],concrete);
+    const profile=new THREE.Shape();
+    profile.moveTo(-.4,0);profile.lineTo(.4,0);profile.lineTo(.4,.18);profile.lineTo(.24,.52);profile.lineTo(.16,.98);
+    profile.lineTo(-.16,.98);profile.lineTo(-.24,.52);profile.lineTo(-.4,.18);profile.closePath();
+    const shape=new THREE.ExtrudeGeometry(profile,{depth:length,bevelEnabled:true,bevelSize:.018,bevelThickness:.018,bevelSegments:1,steps:1});
+    shape.setIndex(Array.from({length:shape.getAttribute('position').count},(_,index)=>index));
+    const uv=shape.getAttribute('uv');for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)/4,uv.getY(i)/4);
+    const barrier=new THREE.Mesh(shape,concrete);barrier.name='CastConcreteJerseyBarrier';barrier.position.set(x,.02,z-length/2);barrier.castShadow=barrier.receiveShadow=true;root.add(barrier);occluders.push(barrier);
+    // Keep the established collision footprint and open insertion lane.
+    colliders.push(new THREE.Box3(new THREE.Vector3(x-.265,.14,z-(length-.14)/2),new THREE.Vector3(x+.265,.86,z+(length-.14)/2)));
+    walls.push({x,z,w:.53,d:length-.14});
     for(const side of [-1,1]) {
       const patch=box('BarrierReflectivePatch',[.018,.14,.32],[x+side*.28,.68,z],yellow);
       patch.rotation.x=.08;
@@ -572,7 +579,21 @@ export function createWorld(scene, canon) {
   }
   for(let i=0;i<3;i++)pallet(-94.5+i*1.8,6.5,2+(i%2));
   // Small covered staging bay, sandbags, generator and fuel drums.
-  box('StagingTentRoof',[5.8,.18,4.6],[-88.7,3.25,8.4],green);
+  // The field shelter is a tensioned canvas roof with a shallow sag between
+  // poles. Woven cloth and folded hems distinguish it from painted machinery.
+  const roofPositions=[],roofUV=[],roofIndices=[],roofColumns=12,roofRows=10;
+  for(let row=0;row<=roofRows;row++)for(let column=0;column<=roofColumns;column++){
+    const u=column/roofColumns,v=row/roofRows;
+    const y=3.72-Math.abs(v-.5)*1.06-Math.sin(u*Math.PI)*.085+Math.sin(u*Math.PI*8)*.017;
+    roofPositions.push(-91.6+u*5.8,y,6.1+v*4.6);roofUV.push(u*1.45,v*1.15);
+    if(row<roofRows&&column<roofColumns){const a=row*(roofColumns+1)+column,b=a+roofColumns+1;roofIndices.push(a,b,a+1,b,b+1,a+1);}
+  }
+  const roofGeometry=new THREE.BufferGeometry();roofGeometry.setAttribute('position',new THREE.Float32BufferAttribute(roofPositions,3));roofGeometry.setAttribute('uv',new THREE.Float32BufferAttribute(roofUV,2));roofGeometry.setIndex(roofIndices);roofGeometry.computeVertexNormals();
+  const tentRoof=new THREE.Mesh(roofGeometry,fabric);tentRoof.name='TensionedCanvasShelter';tentRoof.castShadow=tentRoof.receiveShadow=true;root.add(tentRoof);occluders.push(tentRoof);
+  for(const side of[-1,1]){
+    box('CanvasShelterHem',[5.8,.19,.035],[-88.7,3.1,8.4+side*2.3],fabric);
+    pipe([-91.4,3.19,8.4+side*2.25],[-86,3.19,8.4+side*2.25],.027,steel);
+  }
   for(const dx of [-2.7,2.7])for(const dz of [-2.1,2.1])pipe([-88.7+dx,.05,8.4+dz],[-88.7+dx,3.3,8.4+dz],.06,steel);
   box('GeneratorEngine',[1.35,.9,.8],[-88.8,.55,9],green,true);
   box('GeneratorFuelCap',[.2,.12,.2],[-88.8,1.06,9],iron);
@@ -580,8 +601,9 @@ export function createWorld(scene, canon) {
   for(let i=0;i<6;i++)box('GeneratorCoolingFin',[.05,.65,.045],[-89.49,.58,8.72+i*.1],steel);
   pipe([-88.4,.8,9.25],[-88.4,1.4,9.25],.04,iron);
   for(let row=0;row<2;row++)for(let i=0;i<5;i++) {
-    const bag=box('CheckpointSandbag',[.82,.24,.4],[-90.4+i*.75+row*.35,.14+row*.23,6.3],wood);
-    bag.rotation.y=(i%2-.5)*.08;
+    const bag=new THREE.Mesh(new THREE.SphereGeometry(1,12,8),sandbag);
+    bag.name='CheckpointSandbag';bag.scale.set(.44,.145,.23);bag.position.set(-90.4+i*.75+row*.35,.14+row*.23,6.3);
+    bag.rotation.y=(i%2-.5)*.08;bag.castShadow=bag.receiveShadow=true;root.add(bag);occluders.push(bag);
   }
   for(const dz of [-1,1]) {
     cylinder('FuelDrum',.36,1.08,[-92,.55,8.5+dz*.5],green,false,12);
@@ -626,9 +648,16 @@ export function createWorld(scene, canon) {
     for(let dash=0;dash<9;dash++)box('EquipmentLaneMark',[.07,.008,.55],[x-12.8,.008,z+3.5+dash*1.05],yellow);
   }
   // Low-cost wet patches catch the weapon beam. No lights are added to fixtures.
-  const wet=new THREE.MeshStandardMaterial({color:0x25302d,metalness:.45,roughness:.16,transparent:true,opacity:.5,depthWrite:false});
+  const wet=new THREE.MeshPhysicalMaterial({color:0x34413f,metalness:.025,roughness:.12,clearcoat:1,clearcoatRoughness:.055,transparent:true,opacity:.42,depthWrite:false});
   for(let i=0;i<26;i++) {
-    const puddle=new THREE.Mesh(new THREE.CircleGeometry(.7+(i%5)*.28,16),wet);
+    const outline=new THREE.Shape(),radius=.7+(i%5)*.28;
+    for(let edge=0;edge<24;edge++){
+      const angle=edge/24*Math.PI*2,irregular=radius*(.84+.11*Math.sin(angle*3+i*1.7)+.08*Math.cos(angle*7+i*.9));
+      const x=Math.cos(angle)*irregular,y=Math.sin(angle)*irregular;
+      if(edge===0)outline.moveTo(x,y);else outline.lineTo(x,y);
+    }
+    outline.closePath();
+    const puddle=new THREE.Mesh(new THREE.ShapeGeometry(outline),wet);
     puddle.name='RainPuddle';puddle.rotation.x=-Math.PI/2;
     puddle.scale.y=.4+(i%3)*.18;
     puddle.position.set(-98+(i*7.13)%26,.012,-12+(i*4.97)%27);

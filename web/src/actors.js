@@ -314,21 +314,26 @@ export function createActor(id, definition, settings = {}) {
   const hitMeshes=[];mesh.traverse(object=>{if(object.isMesh)hitMeshes.push(object);});
   const rig={mesh,body,torso,head,right,left,rHip,lHip,rHand,lHand,rFoot,lFoot,hair,jaw,appendages,hitMeshes,tag,weapon,id,
     primaryParts,rootPart,rigType:'R6',armed:!!weapon&&!['Axe','Katana'].includes(settings.WeaponName),
-    gaitDistance:0,gaitBlend:0,lastPosition:mesh.position.clone()};
+    gaitDistance:0,gaitBlend:0,lastPosition:mesh.position.clone(),
+    locomotion:{phase:0,stride:.58,runBlend:0,grounded:true,speed:0,
+      feet:[{planted:false,anchor:new THREE.Vector3()},{planted:false,anchor:new THREE.Vector3()}]}};
   mesh.userData.rig=rig;
   animateActor(rig,'Idle',0,1,false,{speed:0,distance:0});
   return rig;
 }
 
 const poses={
-  Idle:[.04,.04,0],Walk:[.04,.04,0],Sit:[.12,.12,.025],
+  Idle:[.04,.04,0],Walk:[.04,.04,0],Run:[.04,.04,0],Sit:[.12,.12,.025],
   Guard:[.95,1.05,-.02],Windup:[2.15,.5,-.06],Strike:[.65,.4,.13],Attack:[1.2,.65,.08],
   Kick:[.65,.5,-.1],Grab:[1.2,1.2,.05],Lift:[2.1,2.1,-.03],Slam:[.75,.75,.22],
   Fire:[.82,1.05,0],Burst:[.88,1.08,-.025],Throw:[.55,1.8,.1],
   Stagger:[-.2,.5,-.11],Hit:[.25,.4,-.08],Down:[.15,.25,0],Death:[.15,.25,0],
 };
 const clamp=THREE.MathUtils.clamp;
-const soleBounds=new THREE.Box3(),rootPosition=new THREE.Vector3();
+const soleBounds=new THREE.Box3(),rootPosition=new THREE.Vector3(),legOrigin=new THREE.Vector3();
+const footTarget=new THREE.Vector3(),footCenter=new THREE.Vector3(0,-.715,-.025),rotatedFoot=new THREE.Vector3();
+const inverseBody=new THREE.Quaternion(),legRotation=new THREE.Quaternion(),legEuler=new THREE.Euler(0,0,0,'YXZ');
+const TAU=Math.PI*2;
 
 function holdRifle(rig,time,gait){
   const weapon=rig.weapon;
@@ -356,53 +361,91 @@ function plantLeg(rig,hip,lift){
   rig.body.updateWorldMatrix(true,true);
   soleBounds.setFromObject(hip);
   rig.mesh.getWorldPosition(rootPosition);
-  const worldUp=rig.body.matrixWorld.elements[5];
-  if(Math.abs(worldUp)>.2)hip.position.y+=(rootPosition.y+lift-soleBounds.min.y)/worldUp;
+  hip.getWorldPosition(legOrigin);legOrigin.y+=rootPosition.y+lift-soleBounds.min.y;
+  // Correct along world up, so a leaning RootJoint cannot push a planted boot
+  // sideways when its Hip Motor6D is adjusted to the floor.
+  rig.body.worldToLocal(legOrigin);hip.position.copy(legOrigin);
 }
 
 export function animateActor(rig,pose,time,dt,moving=false,motion=null){
   if(rig.disposed)return;
-  const p=poses[pose]||poses.Idle,blend=1-Math.exp(-Math.min(.1,dt)*13);
-  const actual=rig.mesh.position.distanceTo(rig.lastPosition);rig.lastPosition.copy(rig.mesh.position);
-  const speed=motion?.speed??(dt>0?actual/dt:0);
-  if(Number.isFinite(motion?.distance))rig.gaitDistance=motion.distance;else if(actual<2)rig.gaitDistance+=actual;
-  const locomotion=(pose==='Walk'||pose==='Idle')&&moving&&speed>.04;
+  const elapsed=Number.isFinite(dt)?clamp(dt,0,.1):0;
+  const p=poses[pose]||poses.Idle,blend=1-Math.exp(-elapsed*13),state=rig.locomotion;
+  const dx=rig.mesh.position.x-rig.lastPosition.x,dz=rig.mesh.position.z-rig.lastPosition.z;
+  const actual=Math.hypot(dx,dz);rig.lastPosition.copy(rig.mesh.position);
+  const speed=Number.isFinite(motion?.speed)?Math.max(0,motion.speed):(elapsed>0&&actual<2?actual/elapsed:0);
+  const previousDistance=rig.gaitDistance;
+  if(Number.isFinite(motion?.distance))rig.gaitDistance=Math.max(0,motion.distance);
+  else if(actual<2)rig.gaitDistance+=actual||(Number.isFinite(motion?.speed)?speed*elapsed:0);
+  // Integrate travelled distance, rather than recomputing phase from a changing
+  // stride length. Sprint transitions cannot rewind a foot into its last step.
+  const travelled=clamp(rig.gaitDistance-previousDistance,0,Math.max(.4,speed*elapsed*2));
+  const grounded=motion?.grounded!==false;
+  const locomotion=['Walk','Run','Idle'].includes(pose)&&moving&&speed>.04&&grounded;
+  const running=pose==='Run'||(motion?.sprinting??speed>3.4);
+  state.runBlend=THREE.MathUtils.lerp(state.runBlend,locomotion&&running?1:0,blend);
   rig.gaitBlend=THREE.MathUtils.lerp(rig.gaitBlend,locomotion?1:0,blend);
-  const gait=rig.gaitBlend,step=.58,phase=rig.gaitDistance/(step*2)*Math.PI*2;
+  const gait=rig.gaitBlend,run=state.runBlend;
+  const walkStride=clamp(.58+(speed-1.5)*.11,.5,.87),runStride=clamp(1.08+(speed-3.4)*.07,1.02,1.34);
+  const stride=THREE.MathUtils.lerp(walkStride,runStride,run);
+  if(locomotion)state.phase+=travelled/stride*Math.PI;
+  const phase=state.phase;
+  Object.assign(state,{stride,grounded,speed,heading:Number.isFinite(motion?.heading)?motion.heading:actual>.0001?Math.atan2(-dx,-dz):rig.mesh.rotation.y});
+  const relativeHeading=Math.atan2(Math.sin(state.heading-rig.mesh.rotation.y),Math.cos(state.heading-rig.mesh.rotation.y));
+  const infected=rig.id==='Infected';
+  // Uneven support time and recovery give workers a limp without replacing
+  // genuine planted steps with a time-driven hover or changing boss identities.
+  const gaitPhase=phase+(infected?Math.sin(phase)*.17:0);
   const fallen=pose==='Down'||pose==='Death',seated=pose==='Sit';
-  rig.body.position.y=THREE.MathUtils.lerp(rig.body.position.y,fallen?.5:seated?.95:1.2-Math.abs(Math.sin(phase*2))*.012*gait,blend);
-  rig.body.rotation.x=THREE.MathUtils.lerp(rig.body.rotation.x,fallen?.035:p[2]+(rig.id==='Katya'?.05:0),blend);
-  rig.body.rotation.z=THREE.MathUtils.lerp(rig.body.rotation.z,fallen?-Math.PI/2:Math.sin(phase)*.008*gait,blend);
-  // Torso breathing is subtle; the six R6 body joints remain rigid.
-  rig.torso.scale.y=1+(fallen?0:Math.sin(time*1.65)*.002);
-  const carrying=rig.armed&&['Idle','Walk','Guard','Fire','Burst'].includes(pose);
+  const transfer=Math.sin(gaitPhase),compression=Math.sin(gaitPhase*2);
+  rig.body.position.x=THREE.MathUtils.lerp(rig.body.position.x,fallen?0:transfer*(.018+run*.025)*gait,blend);
+  rig.body.position.y=THREE.MathUtils.lerp(rig.body.position.y,fallen?.5:seated?.95:1.2+Math.sin(time*1.65)*.001-(.018+run*.065)*gait-Math.abs(compression)*(.018+run*.026)*gait,blend);
+  rig.body.rotation.x=THREE.MathUtils.lerp(rig.body.rotation.x,fallen?.035:p[2]+(rig.id==='Katya'?.05:0)+(infected?.16:0)+(.045+run*.13)*gait,blend);
+  rig.body.rotation.y=THREE.MathUtils.lerp(rig.body.rotation.y,fallen?0:transfer*(.025+run*.06)*gait,blend);
+  rig.body.rotation.z=THREE.MathUtils.lerp(rig.body.rotation.z,fallen?-Math.PI/2:transfer*(infected?.045:.018+run*.023)*gait,blend);
+  // Breathing moves the RootJoint; every primary part keeps its rigid size.
+  rig.torso.scale.setScalar(1);
+  const carrying=rig.armed&&['Idle','Walk','Run','Guard','Fire','Burst'].includes(pose);
   for(const[arm,side,target]of[[rig.right,1,p[0]],[rig.left,-1,p[1]]]){
-    arm.rotation.x=THREE.MathUtils.lerp(arm.rotation.x,target-side*Math.sin(phase)*.34*gait,blend);
-    arm.rotation.y=THREE.MathUtils.lerp(arm.rotation.y,0,blend);
-    arm.rotation.z=THREE.MathUtils.lerp(arm.rotation.z,-side*.025,blend);
+    const reach=infected?.42+Math.sin(gaitPhase*.5+side)*.08:0;
+    arm.rotation.x=THREE.MathUtils.lerp(arm.rotation.x,target+reach-side*Math.sin(gaitPhase)*(infected?.32:.38+run*.39)*gait,blend);
+    arm.rotation.y=THREE.MathUtils.lerp(arm.rotation.y,-side*run*.07*gait,blend);
+    arm.rotation.z=THREE.MathUtils.lerp(arm.rotation.z,-side*(infected?.085:.025+run*.04),blend);
   }
-  for(const[hip,offset]of[[rig.rHip,0],[rig.lHip,Math.PI]]){
+  rig.body.updateWorldMatrix(true,true);inverseBody.copy(rig.body.quaternion).invert();
+  for(const[index,hip,offset]of[[0,rig.rHip,0],[1,rig.lHip,Math.PI]]){
+    const foot=state.feet[index],side=index===0?1:-1;
     hip.position.set(hip===rig.rHip?.2:-.2,-.4,0);hip.rotation.set(0,0,0);
-    if(fallen){hip.rotation.x=hip===rig.rHip?.08:-.08;continue;}
-    if(seated){hip.rotation.x=Math.PI/2;continue;}
-    const cycle=((phase+offset)%(Math.PI*2)+Math.PI*2)%(Math.PI*2),stance=cycle<Math.PI;
+    if(fallen){foot.planted=false;hip.rotation.x=hip===rig.rHip?.08:-.08;continue;}
+    if(seated){foot.planted=false;hip.rotation.x=Math.PI/2;continue;}
+    const cycle=((gaitPhase+offset)%TAU+TAU)%TAU,stance=cycle<Math.PI;
     const t=stance?cycle/Math.PI:(cycle-Math.PI)/Math.PI;
-    const z=(stance?-step/2+t*step:step/2-t*step)*gait;
-    const theta=Math.atan2(-z,.8);
-    hip.rotation.x=theta;
-    // Motor6D Transform may translate as well as rotate: compensate the small
-    // rigid-leg arc so its stance boot does not slide forward with the body.
-    hip.position.z=z+.715*Math.sin(theta)+.025*Math.cos(theta)-.025;
-    let lift=(stance?0:Math.sin(t*Math.PI)*.14)*gait;
-    if(pose==='Kick'&&hip===rig.rHip){hip.rotation.x=.95;lift=.28;}
+    const recovery=t-Math.sin(t*TAU)/TAU;
+    const z=(stance?-stride/2+t*stride:stride/2-recovery*stride)*gait;
+    let theta=Math.atan2(-z,.72),lift=(stance?0:Math.sin(t*Math.PI)*(.14+run*.17)*(infected&&index===1?.72:1))*gait;
+    if(!grounded){theta=index===0?.28:-.18;lift=.1;}
+    if(pose==='Kick'&&hip===rig.rHip){theta=.95;lift=.28;}
+    // RootJoint supplies weight shift and counterrotation while the six rigid
+    // limbs keep their original geometry. Translate each Hip Motor6D to solve
+    // the boot centre, and hold support feet in world space until toe-off.
+    legEuler.set(theta,relativeHeading*gait,0,'YXZ');legRotation.setFromEuler(legEuler);
+    hip.quaternion.copy(inverseBody).multiply(legRotation);
+    footTarget.set(side*.2+Math.sin(relativeHeading)*z,0,-.025+Math.cos(relativeHeading)*z);
+    rig.mesh.localToWorld(footTarget);
+    const planted=locomotion&&stance;
+    if(planted){if(!foot.planted)foot.anchor.copy(footTarget);footTarget.x=foot.anchor.x;footTarget.z=foot.anchor.z;}
+    foot.planted=planted;foot.stance=stance;foot.lift=lift;
+    rig.body.worldToLocal(footTarget);
+    rotatedFoot.copy(footCenter).applyQuaternion(hip.quaternion);
+    hip.position.x=footTarget.x-rotatedFoot.x;hip.position.z=footTarget.z-rotatedFoot.z;
     plantLeg(rig,hip,lift);
   }
   if(fallen){
     rig.body.updateWorldMatrix(true,true);soleBounds.setFromObject(rig.body);rig.mesh.getWorldPosition(rootPosition);
     rig.body.position.y+=Math.max(0,rootPosition.y-soleBounds.min.y);
   }
-  rig.head.rotation.x=THREE.MathUtils.lerp(rig.head.rotation.x,rig.id==='Katya'?.08+Math.sin(time*.8)*.04:Math.sin(time*.7)*.012,blend);
-  rig.head.rotation.y=THREE.MathUtils.lerp(rig.head.rotation.y,fallen?0:Math.sin(time*.43)*.025,blend);
+  rig.head.rotation.x=THREE.MathUtils.lerp(rig.head.rotation.x,rig.id==='Katya'?.08+Math.sin(time*.8)*.04:Math.sin(time*.7)*.012-(infected?.08:run*.06)*gait,blend);
+  rig.head.rotation.y=THREE.MathUtils.lerp(rig.head.rotation.y,fallen?0:Math.sin(time*.43)*.025-transfer*.035*gait,blend);
   rig.head.rotation.z=fallen?0:Math.sin(time*1.2)*(rig.id==='Katya'?.04:.006);
   if(rig.weapon&&rig.armed){
     if(carrying)holdRifle(rig,time,gait);

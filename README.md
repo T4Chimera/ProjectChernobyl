@@ -1,6 +1,9 @@
 # Project Chernobyl
 
 **Browser game:** [GitHub Pages play address](https://t4chimera.github.io/ProjectChernobyl/).
+**Execution review:** [Open all 20 animations](https://t4chimera.github.io/ProjectChernobyl/execution-viewer.html).
+The standalone HTML viewer can be saved and opened offline; local builds write
+`build/ExecutionViewer.html`.
 See [WEB_README.md](WEB_README.md) for browser controls, local development, and
 Pages activation if the repository has not enabled hosting yet. The browser
 edition includes Overwatch's 22-step mission chain, a minimap, stamina,

@@ -91,7 +91,7 @@ export function createWeaponView(camera) {
     for(const child of [...parent.children])if(child.isMesh){const list=batches.get(child.material)||[];list.push(child);batches.set(child.material,list);}
     for(const [mat,list]of batches){
       if(list.length<2)continue;
-      const pieces=list.map(m=>m.geometry.clone().applyMatrix4(m.matrix));
+      const pieces=list.map(m=>(m.geometry.index?m.geometry.toNonIndexed():m.geometry.clone()).applyMatrix4(m.matrix));
       const merged=mergeGeometries(pieces,false);pieces.forEach(g=>g.dispose());
       if(merged){const mesh=new THREE.Mesh(merged,mat);mesh.name='RifleDetailBatch';parent.add(mesh);list.forEach(m=>{m.removeFromParent();m.geometry.dispose();});}
     }

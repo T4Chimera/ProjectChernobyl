@@ -60,11 +60,88 @@ test('classic R6 Motor6D translation keeps the stance boot planted in world spac
 
 test('rigid R6 arms retain both rifle grip contacts through idle, walking and firing',()=>{
   const rig=createActor('Player',null,{WeaponName:'PrototypeRifle'});
-  for(const pose of ['Idle','Walk','Guard','Fire','Strike','Idle']){
-    for(let i=0;i<20;i++)animateActor(rig,pose,i/60,1/60,pose==='Walk',{speed:pose==='Walk'?1.5:0,distance:i*.025});
+  for(const pose of ['Idle','Walk','Run','Guard','Fire','Strike','Idle']){
+    const moving=['Walk','Run'].includes(pose),speed=pose==='Run'?5.7:1.5;
+    for(let i=0;i<20;i++)animateActor(rig,pose,i/60,1/60,moving,{speed:moving?speed:0,distance:i*speed/60});
     rig.mesh.updateMatrixWorld(true);if(pose==='Strike')continue;
     for(const[hand,grip]of[[rig.rHand,new THREE.Vector3(0,-.23,.06)],[rig.lHand,new THREE.Vector3(0,0,-.63)]])assert.ok(hand.getWorldPosition(new THREE.Vector3()).distanceTo(rig.weapon.localToWorld(grip))<.005,`${pose} hand missed grip`);
   }
+  disposeActor(rig);
+});
+
+function gaitSample(id,speed,sprinting){
+  const rig=createActor(id,null,{}),sample={minSwing:Infinity,maxSwing:-Infinity,clearance:0,leftClearance:0,contacts:0};
+  for(let i=0;i<240;i++){
+    const distance=i*speed/60;rig.mesh.position.z=-distance;
+    animateActor(rig,'Walk',i/60,1/60,true,{speed,distance,sprinting});
+    const[right,left]=boots(rig);
+    assert.ok(Math.min(right.min.y,left.min.y)>-.002,`${id} moving sole tunnelled`);
+    if(Math.min(right.min.y,left.min.y)<.006)sample.contacts++;
+    if(i<60)continue;
+    sample.minSwing=Math.min(sample.minSwing,rig.rHip.rotation.x);
+    sample.maxSwing=Math.max(sample.maxSwing,rig.rHip.rotation.x);
+    sample.clearance=Math.max(sample.clearance,right.min.y);sample.leftClearance=Math.max(sample.leftClearance,left.min.y);
+    for(const name of ['Torso','Right Arm','Left Arm','Right Leg','Left Leg'])assert.deepEqual(rig.primaryParts[name].scale.toArray(),[1,1,1],`${name} stretched during gait`);
+  }
+  Object.assign(sample,{swing:sample.maxSwing-sample.minSwing,phase:rig.locomotion.phase,stride:rig.locomotion.stride,lean:rig.body.rotation.x,runBlend:rig.locomotion.runBlend});
+  disposeActor(rig);return sample;
+}
+
+test('sprinting visibly lengthens rigid leg swings and foot clearance with a faster distance-driven cadence',()=>{
+  const walk=gaitSample('Player',1.5,false),run=gaitSample('Player',5.7,true);
+  assert.ok(run.swing>walk.swing*1.7,`sprint swing ${run.swing} barely exceeds walk ${walk.swing}`);
+  assert.ok(run.clearance>.28&&run.clearance>walk.clearance*2,'sprint has no visible foot recovery');
+  assert.ok(run.stride>walk.stride*2&&run.phase>walk.phase*1.5,'speed did not change stride and cadence');
+  assert.ok(run.lean>walk.lean+.1&&run.runBlend>.99,'sprint has no forward weight transfer');
+  assert.equal(run.contacts,240,'grounded runner hovered between steps');
+});
+
+test('infected run with two genuine unequal recovery steps and a hunched upper body',()=>{
+  const sample=gaitSample('Infected',4.8,undefined);
+  assert.ok(sample.runBlend>.99,'fast chase did not infer running');
+  assert.ok(sample.swing>1.2&&sample.clearance>.28&&sample.leftClearance>.19,'infected legs barely moved');
+  assert.ok(sample.clearance>sample.leftClearance*1.25,'infected lost uneven recovery');
+  assert.ok(sample.lean>.3,'infected lost hunched chase posture');
+  assert.equal(sample.contacts,240,'infected hovered instead of stepping');
+});
+
+test('phase follows horizontal travel, stays continuous across sprint changes and freezes in the air or at rest',()=>{
+  const rig=createActor('Player',null,{});
+  for(let i=0;i<120;i++){
+    const distance=i*.04;rig.mesh.position.z=-distance;
+    const phase=rig.locomotion.phase;
+    animateActor(rig,'Walk',i/60,1/60,true,{speed:2.4,distance,sprinting:i>60});
+    assert.ok(rig.locomotion.phase>=phase&&rig.locomotion.phase-phase<.3,'stride change rewound or jumped phase');
+  }
+  const phase=rig.locomotion.phase;
+  for(let i=0;i<90;i++){
+    rig.mesh.position.y=.5+Math.sin(i/90*Math.PI);
+    animateActor(rig,'Run',3+i/60,1/60,true,{speed:5.7,distance:4.76,grounded:false});
+    assert.equal(rig.locomotion.phase,phase,'air time drove a planted-foot cycle');
+    assert.equal(rig.locomotion.grounded,false);
+  }
+  rig.mesh.position.y=0;
+  for(let i=0;i<120;i++)animateActor(rig,'Idle',5+i/60,1/60,false,{speed:0,distance:4.76,grounded:true});
+  assert.equal(rig.locomotion.phase,phase);
+  assert.ok(rig.gaitBlend<.001&&rig.locomotion.runBlend<.001);
+  for(const bounds of boots(rig))assert.ok(Math.abs(bounds.min.y)<.003,'resting foot remained raised');
+  assert.ok(Math.abs(rig.rHip.rotation.x)<.001&&Math.abs(rig.lHip.rotation.x)<.001);
+  disposeActor(rig);
+});
+
+test('support feet remain planted while the RootJoint shifts weight and the actor turns',()=>{
+  const rig=createActor('Player',null,{});
+  let anchor=null,weightMin=Infinity,weightMax=-Infinity;
+  for(let i=0;i<28;i++){
+    const distance=.08+i*.013;rig.mesh.position.z=-distance;rig.mesh.rotation.y=i*.006;
+    animateActor(rig,'Walk',i/60,1/60,true,{speed:1.5,distance,heading:0,sprinting:false});
+    rig.mesh.updateMatrixWorld(true);
+    const center=rig.mesh.getObjectByName('RightBoot').getWorldPosition(new THREE.Vector3());
+    if(!anchor)anchor=center.clone();
+    assert.ok(Math.hypot(center.x-anchor.x,center.z-anchor.z)<.003,'support boot slid during body counterrotation');
+    weightMin=Math.min(weightMin,rig.body.position.x);weightMax=Math.max(weightMax,rig.body.position.x);
+  }
+  assert.ok(weightMax-weightMin>.008,'body never transferred weight over its support leg');
   disposeActor(rig);
 });
 

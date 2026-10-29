@@ -8,6 +8,10 @@ import {createAudio} from './audio.js';
 import {createWeaponView} from './weapon-view.js';
 import {createAtmosphere} from './atmosphere.js';
 import {createActor,animateActor} from './actors.js';
+import {createIntro} from './intro.js';
+import {createExecutionPreview} from './execution-preview.js';
+import {createRenderPipeline} from './render-pipeline.js';
+import {createBloodEffects} from './blood-effects.js';
 import './style.css';
 
 const canvas=document.querySelector('#game-canvas');
@@ -45,8 +49,9 @@ player.position.y=0;
 let yaw=-Math.PI/2,pitch=0,stamina=100,staminaDelay=0,exhausted=false,verticalVelocity=0;
 let paused=true,firing=false,aiming=false,started=false,cameraMode='briefing',lastMode='briefing';
 let nearest=null,currentSector=null,recoil=0,reloadStart=0,shotKick=0,lastShot=-10,lastHurt=-10;
-let runtime=0,fps=60,ui;
+let runtime=0,fps=60,ui,intro,preview,playerDistance=0;
 const fx=[],raycaster=new THREE.Raycaster();
+const bloodEffects=createBloodEffects(scene);
 const marker=new THREE.Group();
 const ring=new THREE.Mesh(new THREE.RingGeometry(.35,.4,32),new THREE.MeshBasicMaterial({color:0xc5ab6c,transparent:true,opacity:.75,side:THREE.DoubleSide,depthWrite:false}));
 ring.rotation.x=-Math.PI/2;marker.add(ring);scene.add(marker);
@@ -65,6 +70,11 @@ const game=createGameplay({scene,world,canon,onEvent:event=>{
     if(!event.own)audio.shot({position:event.origin,distance:event.origin.distanceTo(player.position),indoor:isInterior(event.origin),own:false});
   }
   if(event.type==='blood'&&settings.blood)specks(event.position);
+  if(event.type==='execution-cue'){
+    audio.executionCue(event.kind,{position:event.position,intensity:event.intensity,indoor:isInterior(event.position),own:event.kind==='gunshot'});
+    if(event.blood&&settings.blood)bloodEffects.emit(event.bloodPosition??event.position,Math.min(.8,event.intensity??1));
+    if(event.kind==='gunshot'&&event.origin&&event.target)trace(event.origin.clone().add(new THREE.Vector3(0,1,0)),event.target.clone().add(new THREE.Vector3(0,.7,0)));
+  }
   if(event.type==='hurt'){lastHurt=runtime;audio.hurt();}
   if(event.type==='reload'){reloadStart=runtime;audio.reload();}
   if(event.type==='resupply'){audio.radio();ui.event({type:'notice',text:'AMMUNITION RESUPPLIED',duration:2});}
@@ -95,6 +105,8 @@ checkpointOperator.mesh.position.set(world.spawn.x+5.5,0,-1.45);checkpointOperat
 scene.add(checkpointOperator.mesh);
 world.colliders.push(new THREE.Box3(new THREE.Vector3(world.spawn.x+5.05,0,-1.8),new THREE.Vector3(world.spawn.x+5.95,1.8,-1.1)));
 const atmosphere=createAtmosphere(scene,world,renderer);
+atmosphere.setFlashlight(flash);
+const pipeline=createRenderPipeline(renderer,scene,camera);
 // The operator's light remains visible during takedowns after the first-person
 // viewmodel is hidden. It catches both intact silhouettes in the dark hall.
 const stagedLight=new THREE.SpotLight(0xffedd2,70,14,.95,.8,1);
@@ -110,6 +122,7 @@ function applyQuality(){
   flash.shadow.mapSize.set(resolution,resolution);
   if(flash.shadow.map){flash.shadow.map.dispose();flash.shadow.map=null;}
   flash.shadow.needsUpdate=true;atmosphere.setQuality(settings.quality);
+  pipeline.setQuality(settings.quality);pipeline.resize(innerWidth,innerHeight,renderer.getPixelRatio());
 }
 applyQuality();
 // Gameplay owns the single intact victim rig for executions and ordinary death.
@@ -120,11 +133,7 @@ function trace(from,to){
   const mesh=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xc6ad75,transparent:true,opacity:.65}));scene.add(mesh);fx.push({mesh,life:.065,total:.065});
 }
 function specks(position){
-  if(fx.length>90)return;
-  for(let i=0;i<4;i++){
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(.035,.035,.035),new THREE.MeshBasicMaterial({color:0x8e3733,transparent:true}));
-    mesh.position.copy(position);scene.add(mesh);fx.push({mesh,life:.3,total:.3,velocity:new THREE.Vector3(Math.random()-.5,Math.random()*.7,Math.random()-.5)});
-  }
+  bloodEffects.emit(position,.6);
 }
 
 function blocked(position){
@@ -171,7 +180,7 @@ function resume(){
 function newRun(force='Nu-7',mode='operative'){
   audio.start();missionDirector.reset();game.start(force,mode);
   started=true;paused=false;player.mode=mode;player.position.copy(world.spawn);player.position.y=0;
-  yaw=-Math.PI/2;pitch=0;stamina=100;exhausted=false;verticalVelocity=0;player.crouching=false;
+  yaw=-Math.PI/2;pitch=0;stamina=100;exhausted=false;verticalVelocity=0;player.crouching=false;playerDistance=0;bloodEffects.clear();
   releaseControls();ui.showScreen('playing');lock();
   announceMission(missionDirector.current());
 }
@@ -185,7 +194,8 @@ function interact(){
 }
 ui=createUI({canon,onAction:action=>{
   switch(action.type){
-    case'start':newRun(action.value.force,action.value.mode);break;
+    case'start':audio.start();intro.fadeToGame(()=>newRun(action.value.force,action.value.mode));break;
+    case'preview-executions':openPreview();break;
     case'resume':resume();break;
     case'pause':pause();break;
     case'respawn':game.respawn();player.position.copy(world.spawn);player.position.y=0;player.crouching=false;stamina=100;exhausted=false;verticalVelocity=0;recoil=shotKick=0;releaseControls();resume();announceMission(missionDirector.current());break;
@@ -210,8 +220,15 @@ ui=createUI({canon,onAction:action=>{
   }
 }});
 ui.showScreen('intro');
+preview=createExecutionPreview({renderer,canon,audio,settings,onClose:()=>{audio.stop();ui.showScreen(started?'pause':'intro');}});
+function openPreview(){
+  if(started&&game.state.phase==='playing')pause();
+  paused=true;releaseControls();document.exitPointerLock?.();intro?.finish();preview.open();
+}
+intro=createIntro({onBegin:()=>audio.beginIntro(),onComplete:()=>{audio.endIntro();if(new URLSearchParams(location.search).has('executions'))openPreview();},getReducedMotion:()=>settings.reducedMotion});
 
 document.addEventListener('keydown',event=>{
+  if(preview.isActive)return;
   if(['Space','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))event.preventDefault();
   if(event.code==='Escape'){if(!paused)pause();return;}
   if(event.code==='KeyM'&&started){paused?resume():pause();return;}
@@ -234,19 +251,20 @@ document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElemen
 canvas.addEventListener('contextmenu',event=>event.preventDefault());
 window.addEventListener('blur',()=>{if(started&&!paused)pause();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&started&&!paused)pause();});
-window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);pipeline.resize(innerWidth,innerHeight,renderer.getPixelRatio());});
 
 function cinematicCamera(dt){
-  const ex=game.state.execution;
+  const ex=game.state.execution??game.state.deathExecution;
   const focus=player.position.clone().add(new THREE.Vector3(0,.85,0));
   const facing=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
   if(ex){
-    focus.lerp(ex.attacker.position.clone().add(new THREE.Vector3(0,.85,0)),.45);
-    facing.subVectors(ex.attacker.position,player.position).setY(0).normalize();
+    if(ex.focus)focus.copy(ex.focus);else focus.lerp(ex.attacker.position.clone().add(new THREE.Vector3(0,.85,0)),.45);
+    if(ex.attacker)facing.subVectors(ex.attacker.position,ex.victim?.position??player.position).setY(0).normalize();
+    else facing.set(Math.sin(ex.heading??yaw),0,Math.cos(ex.heading??yaw));
   }
   const side=new THREE.Vector3(-facing.z,0,facing.x);
   if(side.length()<.1)side.set(1,0,0);
-  const desired=focus.clone().addScaledVector(side,3.3).add(new THREE.Vector3(0,1.8,0)).addScaledVector(facing,-1.5);
+  const desired=focus.clone().addScaledVector(side,ex?.cutaway?3.6:3.3).add(new THREE.Vector3(0,ex?.cutaway?2.2:1.5,0)).addScaledVector(facing,-1.5);
   function clampWall(point){
     const delta=point.clone().sub(focus),length=delta.length();
     if(length<.01)return point;
@@ -262,11 +280,13 @@ let last=performance.now();
 function frame(now){
   requestAnimationFrame(frame);
   const dt=Math.min(.05,Math.max(.001,(now-last)/1000));last=now;runtime+=dt;fps+=((1/dt)-fps)*.03;
-  const playing=started&&!paused&&game.state.phase==='playing';
+  if(preview.isActive){cameraMode='preview';preview.update(dt);return;}
+  if(intro.isActive&&!started){cameraMode='intro';return;}
+  const playing=started&&!paused&&!intro.isActive&&game.state.phase==='playing';
   const previousPosition=player.position.clone();
   if(playing&&!game.state.execution){movePlayer(dt);}
   player.direction.set(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
-  if(started&&(!paused||game.state.phase==='dead'))game.update(dt,player);
+  if(started&&!intro.isActive&&(!paused||game.state.phase==='dead'))game.update(dt,player);
   if(!started){
     cameraMode='briefing';camera.position.set(-96,6.2,11);camera.lookAt(-49,3.4,-5);
   }else if(game.state.execution||game.state.phase==='dead'){
@@ -283,17 +303,22 @@ function frame(now){
   stagedLight.visible=cameraMode==='execution'||cameraMode==='third-person-death';
   if(stagedLight.visible){
     stagedLight.position.copy(player.position).add(new THREE.Vector3(.35,.45,.25));
-    const contact=game.state.execution?.attacker.position??player.position;
-    stagedLight.target.position.copy(contact).add(new THREE.Vector3(0,1.05,0));
+    const contact=game.state.execution?.focus??game.state.deathExecution?.focus??player.position;
+    stagedLight.target.position.copy(contact);
+    if(!game.state.execution?.focus&&!game.state.deathExecution?.focus)stagedLight.target.position.y+=1.05;
     stagedLight.target.updateMatrixWorld();
   }
   if(weapon.visible){
     weaponView.update(dt,{aiming,reloading:game.state.reloading,time:runtime,kick:shotKick,moving:playing&&player.moving?1:0,sprinting:player.sprinting,reducedMotion:settings.reducedMotion,shotAge:runtime-lastShot});
     shotKick*=Math.exp(-dt*16);
   }
-  firstPersonBody.mesh.visible=weapon.visible&&pitch<-.4;
+  firstPersonBody.mesh.visible=weapon.visible&&pitch<-.22;
   firstPersonBody.mesh.position.copy(player.position);firstPersonBody.mesh.rotation.y=yaw;
-  animateActor(firstPersonBody,playing&&player.moving?'Walk':'Idle',runtime,dt,playing&&player.moving);
+  const travelled=Math.hypot(player.position.x-previousPosition.x,player.position.z-previousPosition.z);
+  if(playing&&!game.state.execution)playerDistance+=travelled;
+  const movementHeading=travelled>.0001?Math.atan2(previousPosition.x-player.position.x,previousPosition.z-player.position.z):yaw;
+  animateActor(firstPersonBody,playing&&player.moving?(player.sprinting?'Run':'Walk'):'Idle',runtime,dt,playing&&player.moving,
+    {speed:travelled/dt,distance:playerDistance,heading:movementHeading,sprinting:player.sprinting,grounded:player.position.y<.03});
   animateActor(checkpointOperator,'Guard',runtime,dt,false);
   atmosphere.update(dt,runtime,started?player.position:world.spawn,settings);
   if(player.position.distanceTo(lastShadowCenter)>6){
@@ -323,15 +348,16 @@ function frame(now){
   if(marker.visible){marker.position.copy(mission.targetPosition);marker.position.y=.27;marker.scale.setScalar(1+Math.sin(runtime*2)*.1);}
   for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.life-=dt;if(f.velocity)f.mesh.position.addScaledVector(f.velocity,dt);f.mesh.material.opacity=Math.max(0,f.life/f.total);if(f.life<=0){f.mesh.removeFromParent();f.mesh.geometry.dispose();f.mesh.material.dispose();fx.splice(i,1);}}
   world.update?.(dt,runtime);
+  bloodEffects.update(dt);
   ui.update({state:game.state,stamina,maxStamina:100,mission,sector:sector?.name??'FOUNDATION CHECKPOINT / CONNECTING ROUTE',nearestInteraction:playing&&!game.state.execution?nearest:null,aiming,paused,locked:document.pointerLockElement===canvas,fps,settings,player:{position:player.position,yaw},world,hurt:runtime-lastHurt<.25});
   if(lastMode!==cameraMode){lastMode=cameraMode;document.documentElement.dataset.camera=cameraMode;}
-  scene.updateMatrixWorld();renderer.render(scene,camera);
+  scene.updateMatrixWorld();if(started&&!intro.isActive)pipeline.render(dt);else renderer.render(scene,camera);
 }
 requestAnimationFrame(frame);
 
 // Query-gated test hooks are absent from normal play and never confer server authority.
 if(new URLSearchParams(location.search).has('test')){
-  window.__chernobyl={game,world,player,missions:missionDirector,audio,checkpointOperator,renderer,get cameraMode(){return cameraMode;},get stamina(){return stamina;},get paused(){return paused;},settings,
+  window.__chernobyl={game,world,player,missions:missionDirector,audio,checkpointOperator,renderer,intro,preview,firstPersonBody,pipeline,get cameraMode(){return cameraMode;},get stamina(){return stamina;},get paused(){return paused;},settings,
     start:(force='Nu-7',mode='tour')=>newRun(force,mode),
     teleport(position){player.position.set(...position);game.state.playerPosition.copy(player.position);},
     lookAt(position){const delta=new THREE.Vector3(...position).sub(camera.position);yaw=Math.atan2(-delta.x,-delta.z);pitch=Math.atan2(delta.y,Math.hypot(delta.x,delta.z));},

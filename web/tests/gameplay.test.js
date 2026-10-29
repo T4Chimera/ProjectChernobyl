@@ -3,6 +3,8 @@ import test from 'node:test';
 import * as THREE from 'three';
 import canon from '../src/canon.js';
 import { createGameplay } from '../src/gameplay.js';
+import { createActor, disposeActor } from '../src/actors.js';
+import { getExecutionClips, getExecutionCues, applyExecutionPose } from '../src/execution-choreography.js';
 
 // Actual Three.js geometry/raycasting and exported game data run headlessly.
 // Rendering, pointer lock, browser audio, and full-map navigation need browser tests.
@@ -246,4 +248,118 @@ test('activated bosses stay within their encounter hall when the player retreats
   assert.equal(f.game.state.bosses.get('Felon'), felon);
   f.game.start('Nu-7', 'tour');
   assert.equal(f.game.state.bosses.get('Felon').active, false, 'starting a fresh run clears encounter prerequisites');
+});
+
+const rigTransforms = rig => ['mesh', 'body', 'head', 'right', 'left', 'rHip', 'lHip'].flatMap(name =>
+  [...rig[name].position.toArray(), ...rig[name].quaternion.toArray()]);
+function assertSamePose(actual, expected, message) {
+  const a = rigTransforms(actual), b = rigTransforms(expected);
+  assert(Math.max(...a.map((value, index) => Math.abs(value - b[index]))) < 1e-8, message);
+}
+
+test('all twenty executions use the shared performance, deliver cues once, and preserve their final victim pose until respawn', t => {
+  const f = fixture(t);
+  for (const [bossId, variants] of Object.entries(canon.Executions.Bosses)) {
+    for (const [variantIndex, variant] of variants.entries()) {
+      f.game.start('Nu-7', 'operative');
+      // Keep this encounter isolated while the initial spawn immunity expires.
+      for (const actor of [...f.game.state.bosses.values(), ...f.game.state.infected]) actor.active = false;
+      f.tick(32);
+      const boss = f.game.state.bosses.get(bossId);
+      boss.active = true; boss.provoked = true;
+      boss.position.set(0, 0, -1); boss.home.copy(boss.position);
+      boss.nextAttack = -1; boss.pendingHit = null;
+      // Mikoyan remains an encounter in his room; this fixture puts that room
+      // around the isolated pair instead of making entry alone hostile.
+      f.world.mikoyanRoom.set(new THREE.Vector3(-3, -1, -3), new THREE.Vector3(3, 4, 3));
+      f.game.state.hp = 20;
+      const eventStart = f.events.length;
+      const random = Math.random;
+      try {
+        Math.random = () => (variantIndex + .5) / variants.length;
+        f.tick(2);
+      } finally {
+        Math.random = random;
+      }
+      const execution = f.game.state.execution;
+      assert(execution, `${variant.Id} did not start`);
+      assert.equal(execution.variant, variant.Id);
+      const clip = getExecutionClips(canon).find(item => item.id === variant.Id);
+      assert.equal(execution.duration, clip.duration);
+      assert(execution.duration > variant.Duration, 'gameplay must use the extended prototype choreography duration');
+      assert.equal(boss.moving, false);
+      assert.equal(boss.moveDestination, null);
+      assert(!f.game.fire(new THREE.Vector3(0, 1.4, 0), new THREE.Vector3(0, 0, -1)));
+      assert(!f.game.reload());
+      const victim = execution.victim.userData.rig;
+      const referenceAttacker = createActor(bossId, null, canon.Enemies.Bosses[bossId]);
+      const referenceVictim = createActor('Player', null, { WeaponName: 'PrototypeRifle' });
+      try {
+        let frame = 0;
+        while (f.game.state.execution && frame++ < 100) {
+          f.tick();
+          if (!f.game.state.execution || frame % 3 !== 0) continue;
+          applyExecutionPose({ attackerRig: referenceAttacker, victimRig: referenceVictim, variant: clip,
+            elapsed: execution.elapsed, origin: execution.origin, heading: execution.heading });
+          assertSamePose(boss.rig, referenceAttacker, `${variant.Id} attacker pose was overwritten by locomotion`);
+          assertSamePose(victim, referenceVictim, `${variant.Id} victim pose was overwritten`);
+          assert(execution.focus.toArray().every(Number.isFinite));
+        }
+        assert.equal(f.game.state.phase, 'dead', `${variant.Id} did not finish in player death`);
+        assert.equal(f.game.state.hp, 0);
+        assert.equal(f.game.state.execution, null);
+        assert.equal(f.game.state.deathExecution.variant, variant.Id);
+        assert.equal(f.game.state.deathExecution.victim, victim.mesh);
+        applyExecutionPose({ attackerRig: referenceAttacker, victimRig: referenceVictim, variant: clip,
+          elapsed: clip.duration, origin: execution.origin, heading: execution.heading });
+        assertSamePose(victim, referenceVictim, `${variant.Id} loses its final victim pose on completion`);
+        const finalPose = rigTransforms(victim);
+        f.tick(10);
+        assert.deepEqual(rigTransforms(victim), finalPose, `${variant.Id} death updates replace the authored final pose`);
+        const events = f.events.slice(eventStart);
+        const delivered = events.filter(event => event.type === 'execution-cue').map(event => ({
+          at: event.at, kind: event.kind, intensity: event.intensity, blood: event.blood, anchor: event.anchor,
+        }));
+        assert.deepEqual(delivered, getExecutionCues(clip, -.001, clip.duration), `${variant.Id} repeats or loses an execution cue`);
+        assert.equal(events.filter(event => event.type === 'death').length, 1);
+        assert(!events.some(event => event.type === 'shot' || event.type === 'blood'),
+          'execution audio/effects must use the single execution-cue path');
+        assert.equal(f.game.state.deadBosses.size, 0, 'player execution must not defeat its attacker');
+        f.game.respawn();
+        assert.equal(f.game.state.deathExecution, null);
+        assert.equal(f.game.state.execution, null);
+        assert.equal(victim.mesh.visible, false);
+        assert.equal(f.game.state.phase, 'playing');
+        assert.equal(f.game.state.hp, 100);
+        assert(f.game.state.playerPosition.equals(f.world.spawn));
+      } finally {
+        disposeActor(referenceAttacker); disposeActor(referenceVictim);
+      }
+    }
+  }
+});
+
+test('a narrow passage rejects unsafe execution staging and keeps ordinary melee available', t => {
+  const f = fixture(t);
+  f.game.start('Nu-7', 'operative');
+  for (const actor of [...f.game.state.bosses.values(), ...f.game.state.infected]) actor.active = false;
+  f.tick(32);
+  // The 1.3m aisle admits normal actor collision capsules but cannot contain
+  // the larger fallen-body footprint of any candidate cinematic stage.
+  f.world.colliders.push(
+    new THREE.Box3(new THREE.Vector3(-100, 0, -100), new THREE.Vector3(-.65, 3, 100)),
+    new THREE.Box3(new THREE.Vector3(.65, 0, -100), new THREE.Vector3(100, 3, 100)),
+  );
+  const boss = f.game.state.bosses.get('Felon');
+  boss.active = true; boss.position.set(0, 0, -1); boss.home.copy(boss.position);
+  boss.nextAttack = -1; boss.pendingHit = null;
+  f.game.state.hp = 20;
+  f.tick(2);
+  assert.equal(f.game.state.execution, null, 'an unsafe stage must not place actors through aisle walls');
+  assert(!f.events.some(event => event.type === 'execution-start'));
+  assert(boss.pendingHit?.targetIsPlayer, 'failure to stage should still allow the ordinary melee windup');
+  const before = f.game.state.hp;
+  f.tick(4);
+  assert(f.game.state.hp < before, 'the ordinary melee contact still applies validated damage');
+  assert.equal(f.game.state.execution, null);
 });
