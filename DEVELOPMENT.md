@@ -29,7 +29,12 @@
   competing software renderers from stalling capture.
 - All 36 existing Luau CLI tests pass and Rojo builds the preserved Studio
   project. This does not claim Roblox Studio engine testing or final art/acting.
-- Public deployment is verified separately after pushing this release.
+- Published release `5e78993`; Pages workflow `40860917907` built and deployed
+  successfully. Public index and new JS/CSS return HTTP 200. Chromium rendered
+  those live responses and entered play with 12 ordinary infected, no active
+  hostile bosses at insertion, a grounded guard and running ambient music.
+  Public music mute preserves voice/effects; pause/resume and zero runtime errors
+  are verified. Play: https://t4chimera.github.io/ProjectChernobyl/?v=0.3.0
 
 ## 2026-10-28 — Public Pages deployment verified
 
