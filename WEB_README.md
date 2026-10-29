@@ -19,17 +19,22 @@ Roblox Studio. It does not connect to a Roblox server or provide multiplayer.
   approach their isolated sector to activate them. They cannot chase to insertion.
 - Weathered brick/concrete/metal surfaces, wet ground, rain, industrial entrance,
   tactical transport, staging equipment, and sky/flashlight shadows.
-- Layered tactical armor, helmets/NVG, masks, gloves and pouches. Characters use
-  planted-foot walking, articulated knees/elbows, idle breathing and rifle grips.
+- Six rigid R6 body parts with classic shoulder/hip/neck/root pivots, grounded
+  walking, idle breathing and rifle grips. Layered tactical armor, rounded
+  helmets/NVG, goggles, masks, gloves and pouches follow the supplied references.
+  See [R6_IMPORT_GUIDE.md](R6_IMPORT_GUIDE.md) for the Studio handoff.
 - Twenty intact-body execution variants with third-person staging/cameras;
   ordinary death also uses third-person, returning to first-person after redeploy.
 - Overwatch guides a 22-step mission chain ending in extraction. Mikoyan can be
   left peaceful and does not have to be killed to complete the operation.
 - Minimap, objective marker, health/ammunition/stamina, boss indicators,
   subtitles, sound/blood/reduced-motion settings, and touch controls.
-- Original procedural eerie humming/drone score, weather and mechanical sounds,
-  footsteps, weapon/reload effects, and individually profiled speech. Dialogue
-  uses installed browser/OS voices where available; actor recordings are pending.
+- Recorded firearm, handling and footstep effects with distance/stereo filtering
+  and room reverberation; source licenses are in `web/public/audio/SOURCES.md`.
+  The eerie humming/drone score and weather layers remain original procedural audio.
+- Human-recorded dialogue slots with character/radio processing. Missing voice
+  clips keep their subtitles and stay silent; automatic TTS has been removed.
+  [VOICE_RECORDING_GUIDE.md](VOICE_RECORDING_GUIDE.md) includes the recording script.
 - Independent music and voice toggles, plus High/Balanced graphics settings.
   Balanced reduces rain and shadows for less powerful devices.
 

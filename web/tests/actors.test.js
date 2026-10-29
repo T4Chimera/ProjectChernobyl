@@ -1,97 +1,90 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { createActor, animateActor, disposeActor } from '../src/actors.js';
+import {createActor,animateActor,disposeActor} from '../src/actors.js';
 import canon from '../src/canon.js';
+const PARTS=['Head','Left Arm','Left Leg','Right Arm','Right Leg','Torso'];
+function boots(rig){rig.mesh.updateMatrixWorld(true);return ['RightBoot','LeftBoot'].map(name=>new THREE.Box3().setFromObject(rig.mesh.getObjectByName(name)));}
 
-function bootBounds(rig) {
-  rig.mesh.updateMatrixWorld(true);
-  return ['RightBoot', 'LeftBoot'].map(name => new THREE.Box3().setFromObject(rig.mesh.getObjectByName(name)));
-}
-
-test('every articulated character stands with soles on the root ground plane', () => {
-  for (const id of ['Player', ...Object.keys(canon.Bosses), 'Infected']) {
-    const rig = createActor(id, null, canon.Enemies.Bosses[id] || {});
-    for (let i = 0; i < 30; i++) animateActor(rig, 'Idle', i / 60, 1 / 60, false);
-    for (const bounds of bootBounds(rig)) assert.ok(Math.abs(bounds.min.y) < .02, `${id} boot y=${bounds.min.y}`);
-    assert.ok(rig.rElbow && rig.lElbow && rig.rKnee && rig.lKnee && rig.rFoot && rig.lFoot);
-    assert.ok(rig.hitMeshes.length < 65, `${id} accessory geometry was not batched`);
+test('all figures use six rigid classic R6 parts, canonical proportions and grounded soles',()=>{
+  for(const id of ['Player',...Object.keys(canon.Bosses),'Infected']){
+    const rig=createActor(id,null,canon.Enemies.Bosses[id]||{});
+    for(let i=0;i<30;i++)animateActor(rig,'Idle',i/60,1/60,false);
+    assert.equal(rig.rigType,'R6');
+    assert.deepEqual(Object.keys(rig.primaryParts).sort(),PARTS);
+    const jointNames=[];rig.mesh.traverse(object=>{if(object.userData.motor6D)jointNames.push(object.name);});
+    assert.deepEqual(jointNames.sort(),['Left Hip','Left Shoulder','Neck','Right Hip','Right Shoulder','RootJoint']);
+    for(const name of ['Right Arm','Left Arm','Right Leg','Left Leg'])assert.deepEqual(rig.primaryParts[name].userData.sizeStuds,[1,2,1]);
+    assert.deepEqual(rig.torso.userData.sizeStuds,[2,2,1]);
+    assert.ok(!rig.mesh.getObjectByName('RightElbow')&&!rig.mesh.getObjectByName('RightKnee'),'R15 hinges survived R6 conversion');
+    for(const bounds of boots(rig))assert.ok(Math.abs(bounds.min.y)<.003,`${id} idle sole left ground: ${bounds.min.y}`);
+    assert.ok(rig.hitMeshes.length<75,`${id} equipment was not batched`);
     disposeActor(rig);
   }
 });
 
-test('walk uses actual distance, alternates planted feet and flexes the knees', () => {
-  const rig = createActor('Player', null, { WeaponName: 'PrototypeRifle' });
-  let rightSwings = 0, leftSwings = 0, planted = 0;
-  for (let i = 0; i < 120; i++) {
-    const distance = i * .025;
-    rig.mesh.position.z = -distance;
-    animateActor(rig, 'Walk', i / 60, 1 / 60, true, { speed: 1.5, distance });
-    const [right, left] = bootBounds(rig);
-    assert.ok(right.min.y > -.025 && left.min.y > -.025, 'walking feet penetrated ground');
-    if (right.min.y > .07) rightSwings++;
-    if (left.min.y > .07) leftSwings++;
-    if (Math.min(right.min.y, left.min.y) < .025) planted++;
-    assert.ok(rig.rKnee.rotation.x < -.05 && rig.lKnee.rotation.x < -.05, 'knees are rigid');
+test('R6 walking alternates rigid leg swings without tunnelling and settles when movement stops',()=>{
+  const rig=createActor('Player',null,{WeaponName:'PrototypeRifle'});
+  let rightSwings=0,leftSwings=0,planted=0;
+  for(let i=0;i<160;i++){
+    const distance=i*.025;rig.mesh.position.z=-distance;
+    animateActor(rig,'Walk',i/60,1/60,true,{speed:1.5,distance});
+    const[right,left]=boots(rig);
+    assert.ok(right.min.y>-.002&&left.min.y>-.002,'sole passed through floor');
+    if(right.min.y>.07)rightSwings++;if(left.min.y>.07)leftSwings++;
+    if(Math.min(right.min.y,left.min.y)<.003)planted++;
+    assert.deepEqual(rig.primaryParts['Right Leg'].scale.toArray(),[1,1,1],'rigid leg stretched');
   }
-  assert.ok(rightSwings > 10 && leftSwings > 10, 'feet did not alternate swings');
-  assert.ok(planted > 105, 'stance foot does not stay grounded');
-  for (let i = 0; i < 90; i++) animateActor(rig, 'Idle', 3 + i / 60, 1 / 60, false, { speed: 0, distance: 2.975 });
-  for (const bounds of bootBounds(rig)) assert.ok(Math.abs(bounds.min.y) < .01, 'stopped foot failed to settle');
+  assert.ok(rightSwings>15&&leftSwings>15);assert.ok(planted>155);
+  for(let i=0;i<90;i++)animateActor(rig,'Idle',4+i/60,1/60,false,{speed:0,distance:3.975});
+  for(const bound of boots(rig))assert.ok(Math.abs(bound.min.y)<.003);
+  assert.ok(Math.abs(rig.rHip.rotation.x)<.001&&Math.abs(rig.lHip.rotation.x)<.001);
   disposeActor(rig);
 });
 
-test('the stance boot stays planted in world space throughout a forward step', () => {
-  const rig = createActor('Player', null, { WeaponName: 'PrototypeRifle' });
-  for(let i=0;i<90;i++)animateActor(rig,'Walk',i/60,1/60,true,{speed:1.5,distance:0});
+test('classic R6 Motor6D translation keeps the stance boot planted in world space',()=>{
+  const rig=createActor('Player',null,{});
+  for(let i=0;i<100;i++)animateActor(rig,'Walk',i/60,1/60,true,{speed:1.5,distance:0});
   let plantedZ=null;
-  for(let i=0;i<=32;i++) {
-    const distance=.1+i*.01;
-    rig.mesh.position.z=-distance;
+  for(let i=0;i<=35;i++){
+    const distance=.1+i*.01;rig.mesh.position.z=-distance;
     animateActor(rig,'Walk',2+i/60,1/60,true,{speed:1.5,distance});
     rig.mesh.updateMatrixWorld(true);
-    const boot=rig.mesh.getObjectByName('RightBoot');
-    const position=boot.getWorldPosition(new THREE.Vector3());
-    const sole=new THREE.Box3().setFromObject(boot).min.y;
+    const boot=rig.mesh.getObjectByName('RightBoot'),position=boot.getWorldPosition(new THREE.Vector3());
     if(plantedZ===null)plantedZ=position.z;
-    assert.ok(Math.abs(position.z-plantedZ)<.005,'stance boot slid with the body');
-    assert.ok(Math.abs(sole)<.006,`stance sole left the ground: ${sole}`);
+    assert.ok(Math.abs(position.z-plantedZ)<.012,`stance boot slid ${position.z-plantedZ}`);
+    assert.ok(Math.abs(new THREE.Box3().setFromObject(boot).min.y)<.003);
   }
   disposeActor(rig);
 });
 
-test('armed idle, walking and firing keep both gloves on the rifle grips', () => {
+test('rigid R6 arms retain both rifle grip contacts through idle, walking and firing',()=>{
   const rig=createActor('Player',null,{WeaponName:'PrototypeRifle'});
   for(const pose of ['Idle','Walk','Guard','Fire','Strike','Idle']){
     for(let i=0;i<20;i++)animateActor(rig,pose,i/60,1/60,pose==='Walk',{speed:pose==='Walk'?1.5:0,distance:i*.025});
-    rig.mesh.updateMatrixWorld(true);
-    if(pose==='Strike')continue;
-    for(const[elbow,grip]of[[rig.rElbow,new THREE.Vector3(0,-.23,.06)],[rig.lElbow,new THREE.Vector3(0,0,-.63)]]){
-      const glove=elbow.localToWorld(new THREE.Vector3(0,-.34,-.012));
-      const target=rig.weapon.localToWorld(grip);
-      assert.ok(glove.distanceTo(target)<.025,`${pose} hand missed rifle grip`);
-    }
+    rig.mesh.updateMatrixWorld(true);if(pose==='Strike')continue;
+    for(const[hand,grip]of[[rig.rHand,new THREE.Vector3(0,-.23,.06)],[rig.lHand,new THREE.Vector3(0,0,-.63)]])assert.ok(hand.getWorldPosition(new THREE.Vector3()).distanceTo(rig.weapon.localToWorld(grip))<.005,`${pose} hand missed grip`);
   }
   disposeActor(rig);
 });
 
-test('canonical silhouettes retain masks, silent hood figures, hair material and intact execution poses', () => {
-  const nikolai = createActor('Nikolai', null, { WeaponName: 'Axe' });
-  const novak = createActor('Novak', null, { WeaponName: 'Katana' });
-  assert.ok(nikolai.mesh.getObjectByName('PermanentFaceRectangle'));
-  assert.ok(novak.mesh.getObjectByName('PermanentFaceRectangle'));
-  disposeActor(nikolai); disposeActor(novak);
-  for (const id of ['Felon', 'Sukhoi', 'Mikoyan', 'Katya']) {
-    const rig = createActor(id, null, canon.Enemies.Bosses[id]);
-    const count = rig.hitMeshes.length;
-    if (id === 'Katya') assert.ok(rig.hair?.material && !rig.mesh.getObjectByName('TacticalVest'));
-    if (id === 'Sukhoi') assert.ok(rig.jaw && rig.appendages.length === 3);
-    const poses = new Set(canon.Executions.Bosses[id].flatMap(variant => variant.Beats.flatMap(beat => [beat.Pose, beat.VictimPose]).filter(Boolean)));
-    for (const pose of poses) {
-      for (let i = 0; i < 6; i++) animateActor(rig, pose, i / 30, 1 / 30, false);
-      const bounds = new THREE.Box3().setFromObject(rig.mesh);
-      assert.ok(Number.isFinite(bounds.min.y) && Number.isFinite(bounds.max.y));
-      assert.equal(rig.hitMeshes.length, count, 'execution altered body topology');
+test('R6 equipment preserves canonical silhouettes and all intact execution poses',()=>{
+  const player=createActor('Player',null,{});
+  const helmetNames=[];player.mesh.traverse(o=>{helmetNames.push(o.name,...(o.userData.partNames||[]));});
+  for(const name of ['HelmetShell','FoldedOpticTube','BallisticGoggleLens','MicrophoneTip','CarrierMolleLoop'])assert.ok(helmetNames.includes(name),`missing reference detail ${name}`);
+  disposeActor(player);
+  for(const id of Object.keys(canon.Bosses)){
+    const rig=createActor(id,null,canon.Enemies.Bosses[id]),count=rig.hitMeshes.length;
+    if(['Nikolai','Novak'].includes(id))assert.ok(rig.mesh.getObjectByName('PermanentFaceRectangle'));
+    if(id==='Katya')assert.ok(rig.hair?.material);
+    if(id==='Sukhoi')assert.ok(rig.jaw&&rig.appendages.length===3);
+    const poses=new Set(canon.Executions.Bosses[id].flatMap(v=>v.Beats.flatMap(b=>[b.Pose,b.VictimPose]).filter(Boolean)));
+    for(const pose of poses){
+      for(let i=0;i<8;i++)animateActor(rig,pose,i/30,1/30,false);
+      const bounds=new THREE.Box3().setFromObject(rig.mesh);
+      assert.ok(Number.isFinite(bounds.min.y)&&Number.isFinite(bounds.max.y));
+      assert.equal(rig.hitMeshes.length,count,'execution changed intact topology');
+      assert.equal(Object.keys(rig.primaryParts).length,6);
     }
     disposeActor(rig);
   }

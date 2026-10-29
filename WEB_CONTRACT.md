@@ -94,3 +94,17 @@ Chromium+pythonPlaywrightavailable. Npmtoolinstall parenthandles.
 - Audio adds `setMix({music,voice,effects})`, `setTension(0..1)`, `reload()`,
   `footstep(surface,sprinting)`, `dispose()` and `getDebugState()`. Music/voice
   settings are independent booleans. Speech remains browser/OS synthesis.
+
+## Browser 0.4 additions
+
+- Actors now use strict six-part R6 body geometry and classic joint metadata;
+  animated elbow/knee/ankle body joints have been removed. Read
+  `R6_IMPORT_GUIDE.md` for the bind transforms and character/map scale distinction.
+  Feet remain the gameplay root; primary parts are available as `rig.primaryParts`.
+- Audio speech synthesis is removed. `voice-manifest.js` maps exact approved text
+  to stable recording IDs; missing entries mean subtitle-only playback.
+  `sound-assets.js` points to licensed local recordings with documented sources.
+- `shot({position,distance,indoor,own})`, `setListener(position,direction)` and
+  `whenReady()` support spatial playback and decoded-sample verification.
+  Debug state includes samplesLoaded/samplesFailed/sampleShots/fallbackShots,
+  voiceMode='recorded-only' and recordedVoiceMode=true.

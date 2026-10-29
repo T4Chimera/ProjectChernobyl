@@ -17,6 +17,10 @@ with sync_playwright() as p:
     browser = p.chromium.launch(executable_path="/usr/bin/chromium", headless=True,
         args=["--no-sandbox", "--enable-unsafe-swiftshader", "--use-angle=swiftshader"])
     page = browser.new_page(viewport={"width": 1200, "height": 800})
+    page.add_init_script("""window.__ttsCalls=0;
+      if(window.speechSynthesis){const speak=speechSynthesis.speak;
+        speechSynthesis.speak=function(...args){window.__ttsCalls++;return speak.apply(this,args);};}
+    """)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     separator = "&" if "?" in args.url else "?"
@@ -31,6 +35,10 @@ with sync_playwright() as p:
     assert page.evaluate("__chernobyl.game.state.infected.some(b=>b.active&&!b.dead)"), "No ordinary infected available"
     audio = page.evaluate("__chernobyl.audio.getDebugState()")
     assert audio["initialized"] and audio["contextState"] == "running" and audio["musicActive"]
+    page.evaluate("__chernobyl.audio.whenReady()")
+    audio = page.evaluate("__chernobyl.audio.getDebugState()")
+    assert audio["samplesLoaded"] > 0 and audio["samplesFailed"] == 0, audio
+    assert audio["voiceMode"] == "recorded-only" and page.evaluate("__ttsCalls") == 0
     before = page.evaluate("__chernobyl.player.position.x")
     page.keyboard.down("Shift")
     page.keyboard.down("w")
@@ -42,6 +50,11 @@ with sync_playwright() as p:
     assert page.evaluate("__chernobyl.game.state.hp") == 100
     page.screenshot(path=str(output / "playing.png"))
     print("PASS real intro/deploy, first-person movement, sprint stamina, and rendered HUD")
+    page.mouse.down(button="left")
+    page.wait_for_function("__chernobyl.game.state.ammo<30 && __chernobyl.audio.getDebugState().sampleShots>0",timeout=20000)
+    page.mouse.up(button="left")
+    assert page.evaluate("__chernobyl.audio.getDebugState().fallbackShots") == 0
+    print("PASS real input fires a decoded gunshot recording; all audio samples load; no automatic TTS")
 
     # Use the actual range/LOS-validated interaction; test hooks move only the
     # operator so the mission integration can be checked without a long walk.

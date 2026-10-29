@@ -1,5 +1,35 @@
 # Development record
 
+## 2026-10-29 — R6 reference models and recorded audio
+
+- Replaced the browser's segmented limbs with six rigid R6 primary parts,
+  classic shoulder/hip/neck/root anchors, joint bind metadata and a nonrendering
+  HumanoidRootPart reference. Accessories remain attached to the body parts.
+  Walking keeps rigid soles grounded; both hands meet the carried rifle grips.
+- Used the supplied operative references for rounded helmets, raised dual NVG,
+  goggles, balaclavas, headset microphones, layered armor, MOLLE/pouches and
+  straps. Added woven/camouflage surfaces and worn metal; raised the standing
+  camera to the R6 eye line. Preserved canonical boss distinctions and poses.
+- Corrected masonry scale and added material cracks/pores/grain/wear, facade
+  conduits/grime, manufactured equipment detail and cable trays. Fixed rain
+  shelter bounds and solid shadows cast by formerly transparent decals.
+- Added three real CC0 Still North Media rifle recordings, four Kenney concrete
+  footsteps and two metal Foley clips. Files ship locally (474,522 bytes total)
+  with pinned source/production hashes and license text. Handling Foley is not
+  presented as a recording of a particular rifle's reload mechanism.
+- Audio now caches decoded clips with bounded concurrency/transients, distance
+  filtering/panning and shared indoor reflections. Removed automatic TTS.
+  Missing human clips retain subtitles. Added 56 exact recording slots, CSV
+  script, upload guide and character/radio processing for supplied voices.
+- Added R6_IMPORT_GUIDE.md for the existing Studio R6 rig/joints and real Roblox
+  audio upload handoff. Separated Three.js into a stable cached production chunk.
+- Validation: 31 browser tests pass, covering strict R6 structure/ground contact,
+  grips, real sample playback/cache/disposal, recorded-only dialogue and existing
+  combat/mission/encounter rules. Chromium verifies actual-input recorded firing,
+  all nine clips decoding, no TTS, mission activation, third-person execution,
+  respawn and 390px layout with zero runtime errors. All 36 existing Luau CLI
+  tests and the Rojo build pass; Studio engine acceptance remains pending.
+
 ## 2026-10-29 — Browser visual, movement, audio and encounter upgrade
 
 - Rebuilt tactical figures with segmented elbows/knees/ankles, layered armor,

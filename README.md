@@ -4,10 +4,14 @@
 See [WEB_README.md](WEB_README.md) for browser controls, local development, and
 Pages activation if the repository has not enabled hosting yet. The browser
 edition includes Overwatch's 22-step mission chain, a minimap, stamina,
-third-person executions, detailed tactical figures with grounded walking,
-weathered industrial scenery, and an original eerie ambient score. Ordinary
+third-person executions, detailed tactical R6 figures with grounded walking,
+weathered industrial scenery, recorded firearm sounds and an eerie ambient score. Ordinary
 infected appear first; bosses unlock in isolated sectors as field work progresses.
 The Roblox Studio project below is preserved alongside it.
+
+For the next Studio asset pass, see the [R6 handoff](R6_IMPORT_GUIDE.md) and
+[voice recording guide](VOICE_RECORDING_GUIDE.md). Browser dialogue now uses
+supplied human recordings; missing clips retain subtitles without TTS.
 
 A playable **development prototype** built from the creator's [game design](GAME_DESIGN.md)
 and [expanded request](EXPANSION_BRIEF.md). It uses asset-free industrial geometry,

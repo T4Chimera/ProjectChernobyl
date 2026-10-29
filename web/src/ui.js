@@ -48,7 +48,7 @@ export function createUI({ canon, onAction }) {
           <button type="button" class="deploy-button" data-action="deploy"><span>DEPLOY TO THE ZONE</span><span class="deploy-arrow" aria-hidden="true">↗</span></button>
           <div class="deploy-caption"><span class="status-dot"></span> WEAPON LIGHT ISSUED · SINGLE-PLAYER BROWSER PROTOTYPE</div>
           <div class="intro-settings" aria-label="Field settings">${settingButtons()}</div>
-          <p class="audio-note">Original ambient score · adaptive field audio · distinct synthetic voice profiles.</p>
+          <p class="audio-note">Ambient score · recorded weapon audio · recorded dialogue when supplied. Subtitles remain available.</p>
         </div>
 
         <aside class="intro-brief" aria-label="Operation briefing">
@@ -108,7 +108,7 @@ export function createUI({ canon, onAction }) {
   const setText = (name, value) => { if (refs[name] && refs[name].textContent !== String(value)) refs[name].textContent = value; };
 
   function settingButtons() {
-    return Object.entries({ sound: 'MASTER SOUND', music: 'AMBIENT MUSIC', voice: 'VOICE RADIO', subtitles: 'SUBTITLES', blood: 'BLOOD FX', reducedMotion: 'REDUCED MOTION' })
+    return Object.entries({ sound: 'MASTER SOUND', music: 'AMBIENT MUSIC', voice: 'RECORDED VOICE', subtitles: 'SUBTITLES', blood: 'BLOOD FX', reducedMotion: 'REDUCED MOTION' })
       .map(([key, label]) => `<button type="button" data-setting="${key}" aria-pressed="${DEFAULT_SETTINGS[key]}"><i aria-hidden="true"></i>${label}<b>${DEFAULT_SETTINGS[key] ? 'ON' : 'OFF'}</b></button>`).join('') + `<div class="quality-options" aria-label="Graphics quality"><span>GRAPHICS</span><button type="button" data-quality="high" aria-pressed="${DEFAULT_SETTINGS.quality === 'high'}">HIGH</button><button type="button" data-quality="balanced" aria-pressed="${DEFAULT_SETTINGS.quality === 'balanced'}">BALANCED</button></div>`;
   }
 

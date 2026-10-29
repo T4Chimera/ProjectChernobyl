@@ -26,18 +26,26 @@ export function createAtmosphere(scene,world,renderer){
   const pmrem=new THREE.PMREMGenerator(renderer);const environment=pmrem.fromEquirectangular(sky);scene.environment=environment.texture;
   scene.environmentIntensity=.55;sky.dispose();pmrem.dispose();
   let quality='high';
+  const shelters=[
+    {x:world.spawn.x,z:-4.75,w:10.5,d:3.8,y:3.6},
+    {x:-88.7,z:8.4,w:5.8,d:4.6,y:3.5},
+    {x:-78.8,z:0,w:3.2,d:6.4,y:4.5},
+  ];
   return {setQuality(value){quality=value;geometry.setDrawRange(0,value==='balanced'?count:count*2);},
     update(dt,time,position,{reducedMotion=false}={}){
       const budget=quality==='balanced'?Math.ceil(count/2):count;
       for(let i=0;i<budget;i++){
-        const s=i*4,j=i*6,x=position.x+seeds[s],z=position.z+seeds[s+1];
+        const s=i*4,j=i*6;
+        const gust=Math.sin(time*.31)*.23+Math.sin(time*.77)*.07;
+        const x=position.x+seeds[s]+gust,z=position.z+seeds[s+1];
         let y=((seeds[s+2]-time*10)%17+17)%17;
         const roof=world.sectors.some(sector=>sector.id<=3&&Math.abs(x-sector.center.x)<sector.size.x/2&&Math.abs(z-sector.center.z)<sector.size.z/2);
         if(roof&&y<6.5)y=-15;
-        // The checkpoint shelter and adjacent staging tent also shield rain.
-        if(Math.abs(x-world.spawn.x)<5.5&&Math.abs(z)<4.3&&y<3.6)y=-15;
+        // Actual canopy footprints leave the open insertion lane rainy while
+        // keeping the logistics tent and checkpoint radio bay sheltered.
+        if(shelters.some(roof=>Math.abs(x-roof.x)<roof.w/2&&Math.abs(z-roof.z)<roof.d/2&&y<roof.y))y=-15;
         positions[j]=x;positions[j+1]=y;positions[j+2]=z;
-        positions[j+3]=x-.025;positions[j+4]=y+seeds[s+3];positions[j+5]=z+.015;
+        positions[j+3]=x-.025-gust*.06;positions[j+4]=y+seeds[s+3];positions[j+5]=z+.015;
       }
       rain.visible=!reducedMotion;geometry.attributes.position.needsUpdate=true;
       dust.position.set(position.x,1.8,position.z);dust.rotation.y=time*.008;dust.rotation.z=Math.sin(time*.08)*.08;

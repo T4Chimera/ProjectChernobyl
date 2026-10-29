@@ -60,11 +60,13 @@ const game=createGameplay({scene,world,canon,onEvent:event=>{
   ui.event(event);
   if(event.type==='subtitle'&&settings.sound&&settings.voice)audio.speak(event.text,event.speaker);
   if(event.type==='interaction'||event.type==='boss-defeated')missionDirector.observe(event);
-  if(event.type==='shot'){trace(event.origin,event.position);if(!event.own)audio.tone(100,.07,'triangle',.15);}
+  if(event.type==='shot'){
+    trace(event.origin,event.position);
+    if(!event.own)audio.shot({position:event.origin,distance:event.origin.distanceTo(player.position),indoor:isInterior(event.origin),own:false});
+  }
   if(event.type==='blood'&&settings.blood)specks(event.position);
   if(event.type==='hurt'){lastHurt=runtime;audio.hurt();}
   if(event.type==='reload'){reloadStart=runtime;audio.reload();}
-  if(event.type==='reload-complete')audio.tone(260,.08,'triangle',.25);
   if(event.type==='resupply'){audio.radio();ui.event({type:'notice',text:'AMMUNITION RESUPPLIED',duration:2});}
   if(event.type==='boss-defeated')ui.event({type:'notice',text:`${canon.Bosses[event.id].NameTag} / CONTAINED FOR THIS RUN`,duration:5});
   if(event.type==='execution-start'){firing=false;aiming=false;audio.hurt();}
@@ -76,6 +78,10 @@ function announceMission(mission){
   audio.radio();
   ui.event({type:'subtitle',speaker:'Overwatch',text:mission.text,duration:10});
   if(settings.voice)audio.speak(mission.text,'Overwatch',true);
+}
+
+function isInterior(position){
+  return world.sectors.some(sector=>sector.id<=3&&Math.abs(position.x-sector.center.x)<sector.size.x/2&&Math.abs(position.z-sector.center.z)<sector.size.z/2);
 }
 
 const weaponView=createWeaponView(camera);
@@ -268,7 +274,7 @@ function frame(now){
   }else{
     cameraMode='first-person';
     const bob=settings.reducedMotion||!player.moving||!playing?0:Math.sin(runtime*(player.sprinting?13:9))*.025;
-    camera.position.copy(player.position).add(new THREE.Vector3(0,player.crouching?1.12:1.6,0));camera.position.y+=bob;
+    camera.position.copy(player.position).add(new THREE.Vector3(0,player.crouching?1.2:1.8,0));camera.position.y+=bob;
     camera.rotation.set(pitch+recoil,yaw,0,'YXZ');recoil*=Math.exp(-dt*14);
     const targetFov=aiming?canon.Weapon.AimFieldOfView:75;
     camera.fov+=(targetFov-camera.fov)*Math.min(1,dt*12);camera.updateProjectionMatrix();
@@ -295,6 +301,7 @@ function frame(now){
     moon.target.position.copy(player.position);moon.target.updateMatrixWorld();
   }
   if(playing){
+    audio.setListener(player.position,player.direction);
     stepDistance+=player.position.distanceTo(previousPosition);
     if(player.position.y<.03&&stepDistance>(player.sprinting?1.1:.88)){
       audio.footstep(currentSector?'concrete':'gravel',player.sprinting);stepDistance=0;
@@ -304,7 +311,7 @@ function frame(now){
   }
   if(playing&&!game.state.execution&&firing&&runtime-lastShot>=canon.Weapon.FireInterval){
     if(game.fire(camera.position,camera.getWorldDirection(new THREE.Vector3()))){
-      lastShot=runtime;shotKick=.055;audio.shot();if(!settings.reducedMotion)recoil=Math.min(.025,recoil+.012);
+      lastShot=runtime;shotKick=.055;audio.shot({position:player.position,indoor:isInterior(player.position),own:true});if(!settings.reducedMotion)recoil=Math.min(.025,recoil+.012);
     }
   }
   nearest=null;let nearestDistance=2.75;

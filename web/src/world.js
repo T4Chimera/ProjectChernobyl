@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import {createIndustrialMaterials,scaleBoxUVs} from './materials.js';
+import {createIndustrialMaterials,createGrimeMap,scaleBoxUVs} from './materials.js';
 
 // All dimensions derive from the Luau prototype at one-quarter scale. This is
 // a fictionalized industrial site, with operational units 1–4 and unfinished 5–6.
@@ -34,6 +34,13 @@ export function createWorld(scene, canon) {
   const animated = [];
   const geometry = new Map();
   const {concrete,brick,lowerWall,steel,iron,rust,black,yellow,green,wood,paper,blue,deadTube,asphalt,cautionMat,whitePaint,glass,rubber}=createIndustrialMaterials();
+  const grime=new THREE.MeshBasicMaterial({map:createGrimeMap(),color:0x111615,transparent:true,opacity:.58,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1});
+
+  function grimePatch(position,width,height,angle=0) {
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(width,height),grime);
+    mesh.name='WeatherRunoff';mesh.position.set(...position);mesh.rotation.y=angle;
+    root.add(mesh);return mesh;
+  }
 
   function box(name, size, position, material = concrete, solid = false, parent = root) {
     const key = size.join(',');
@@ -56,7 +63,10 @@ export function createWorld(scene, canon) {
   }
 
   function cylinder(name, radius, height, position, material, solid = false, segments = 12) {
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, segments), material);
+    const shape=new THREE.CylinderGeometry(radius,radius,height,segments);
+    const uv=shape.getAttribute('uv');
+    for(let i=0;i<(segments+1)*2;i++)uv.setXY(i,uv.getX(i)*Math.PI*radius/2,uv.getY(i)*height/4);
+    const mesh = new THREE.Mesh(shape, material);
     mesh.name = name;
     mesh.position.set(...position);
     mesh.castShadow = mesh.receiveShadow = true;
@@ -336,12 +346,32 @@ export function createWorld(scene, canon) {
       if (sector.id === 2) {
         box('TurbineHousing', [2.6, 1.6, 1.6], [px, 0.8, pz], steel, true);
         pipe([px - 1.1, 1.4, pz], [px + 1.1, 1.4, pz], 0.58, iron);
+        for(const side of[-1,1]) {
+          const cap=cylinder('TurbineEndCap',.46,.07,[px+side*1.34,.86,pz],iron);cap.rotation.z=Math.PI/2;
+          for(let bolt=0;bolt<8;bolt++)box('TurbineFlangeBolt',[.045,.065,.065],[px+side*1.39,.86+Math.cos(bolt*Math.PI/4)*.35,pz+Math.sin(bolt*Math.PI/4)*.35],steel);
+        }
+        box('TurbineInspectionPanel',[.95,.53,.025],[px,.65,pz+.814],iron);
+        box('InspectionPanelHandle',[.22,.045,.05],[px,.65,pz+.84],steel);
+        for(const side of[-1,1])box('TurbineMountingFoot',[.36,.14,1.84],[px+side*.86,.09,pz],iron);
       } else if (sector.id === 3) {
         box('ElectricalCabinet', [1.1, 2, 1.2], [px, 1, pz], blue, true);
         box('CabinetHandle', [0.06, 0.4, 0.08], [px + 0.3, 1.1, pz + 0.64], iron);
+        box('CabinetDoorSeam',[.022,1.85,.012],[px,1.02,pz+.608],black);
+        for(let vent=0;vent<7;vent++)box('CabinetVentSlot',[.67,.027,.016],[px,.29+vent*.055,pz+.614],black);
+        for(const side of[-1,1])for(const y of[.12,1.89])box('CabinetDoorScrew',[.025,.025,.018],[px+side*.47,y,pz+.617],steel);
+        box('CabinetIsolationPlate',[.23,.29,.018],[px-.26,1.37,pz+.619],yellow);
+        box('CabinetWarningSymbol',[.026,.14,.025],[px-.26,1.38,pz+.632],black).rotation.z=-.35;
       } else {
         box('AbandonedWoodCrate', [1.3, 0.85, 1.3], [px, 0.425, pz], wood, true);
-        box('CrateBrace', [1.35, 0.12, 1.35], [px, 0.6, pz], rust);
+        for(const side of[-1,1]) {
+          for(let slat=0;slat<5;slat++) {
+            box('CrateSideSlat',[1.31,.019,.025],[px,.09+slat*.165,pz+side*.66],iron);
+            box('CrateEndSlat',[.025,.019,1.31],[px+side*.66,.09+slat*.165,pz],iron);
+          }
+          for(const corner of[-1,1])box('CrateCornerStrap',[.075,.86,.075],[px+side*.63,.43,pz+corner*.63],rust);
+          box('CrateTopBrace',[1.32,.055,.1],[px,.884,pz+side*.42],wood);
+        }
+        const brace=box('CrateDiagonalBrace',[1.28,.1,.075],[px,.46,pz+.7],wood);brace.rotation.z=.46;
       }
     }
   });
@@ -463,6 +493,21 @@ export function createWorld(scene, canon) {
   // becomes a new invisible gate that could block Overwatch's first objectives.
   box('RaisedRollerShutterHousing',[.65,.65,4.1],[gateX-.65,3.5,0],iron);
   for(let strip=0;strip<4;strip++)box('RaisedShutterSlat',[.68,.055,4.04],[gateX-.65,3.2+strip*.13,0],steel);
+  for(const side of[-1,1]) {
+    for(const z of[side*7,side*11.2,side*15.5]) {
+      grimePatch([gateX-.768,4.0,z],3.1,5.8,-Math.PI/2);
+      grimePatch([gateX-.768,9.4,z],2.1,3.8,-Math.PI/2);
+    }
+    for(const y of[.5,2.7,5.6,8.7,11.3]) {
+      const bolt=cylinder('FacadePierAnchor',.045,.045,[gateX-1.105,y,side*4.8],steel,false,8);
+      bolt.rotation.z=Math.PI/2;
+    }
+    pipe([gateX-1.0,.4,side*7.5],[gateX-1.0,3.35,side*7.5],.035,iron);
+    pipe([gateX-1.0,3.35,side*7.5],[gateX-1.0,3.35,side*10.5],.035,iron);
+    box('SealedExteriorJunctionBox',[.17,.52,.4],[gateX-1.08,1.73,side*7.5],iron);
+    box('JunctionBoxDoor',[.025,.45,.34],[gateX-1.18,1.73,side*7.5],steel);
+    for(const y of[1.57,1.88])for(const dz of[-.12,.12])box('JunctionDoorFastener',[.035,.025,.025],[gateX-1.2,y,side*7.5+dz],black);
+  }
 
   function jerseyBarrier(x,z,length=2.2) {
     box('JerseyBarrierBase',[.8,.22,length],[x,.11,z],concrete);
@@ -558,10 +603,27 @@ export function createWorld(scene, canon) {
     for(const side of [-1,1]) {
       for(let i=0;i<4;i++)box('FacadeExpansionRib',[.24,6.25,.16],[x+side*22.8,3.1,z-16+i*10.5],iron);
       for(let y=2.9;y<5.7;y+=1.35)pipe([x-21.9,y,z-18],[x-21.9,y,z+18],.045,steel);
+      for(const depth of[-1,1])grimePatch([x+side*22.22,2.5,z+depth*11.5],5.1,4.8,-side*Math.PI/2);
     }
     // Weather-stained hazard plates and flaking numbered utility panels.
     sign('SectorSafetyBoard','DANGER\nHIGH VOLTAGE / LOCKED OUT',[x+21.9,2.3,z+12.2],1.9,1.1,-Math.PI/2,'#c1a66b');
     for(let line=0;line<3;line++)box('FloorDrainGrating',[3.2,.015,.07],[x+3.8,.015,z+12+line*.14],iron);
+    // Realistic service tray and cable runs stay above head height or against
+    // the wall; they add scale without narrowing a mission or combat route.
+    box('OverheadCableTray',[.55,.085,32],[x-19.6,4.15,z],iron);
+    for(let slot=0;slot<32;slot++)box('CableTrayRung',[.6,.055,.065],[x-19.6,4.1,z-15.5+slot],steel);
+    for(const offset of[-.12,0,.12])pipe([x-19.6+offset,4.23,z-16],[x-19.6+offset,4.23,z+16],.018,black);
+    for(let bracket=0;bracket<5;bracket++) {
+      box('CableTrayHanger',[.035,1.5,.035],[x-19.6,4.91,z-14+bracket*7],steel);
+      box('CableTrayWallBracket',[2.2,.055,.07],[x-20.7,4.1,z-14+bracket*7],iron);
+    }
+    for(let loose=0;loose<3;loose++) {
+      const offset=loose*.045;
+      pipe([x-20.2+offset,.025,z+2],[x-20.2+offset,.025,z+7],.012,black);
+      pipe([x-20.2+offset,.025,z+7],[x-19.5+offset,.025,z+8.6],.012,black);
+    }
+    for(const depth of[-1,1])box('FloorExpansionJoint',[39,.006,.025],[x,.004,z+depth*10],iron);
+    for(let dash=0;dash<9;dash++)box('EquipmentLaneMark',[.07,.008,.55],[x-12.8,.008,z+3.5+dash*1.05],yellow);
   }
   // Low-cost wet patches catch the weapon beam. No lights are added to fixtures.
   const wet=new THREE.MeshStandardMaterial({color:0x25302d,metalness:.45,roughness:.16,transparent:true,opacity:.5,depthWrite:false});
@@ -600,7 +662,8 @@ export function createWorld(scene, canon) {
     }
     const batch = new THREE.Mesh(merged, material);
     batch.name = 'BatchedIndustrialGeometry';
-    batch.castShadow = batch.receiveShadow = true;
+    batch.castShadow = meshes.some(mesh=>mesh.castShadow);
+    batch.receiveShadow = meshes.some(mesh=>mesh.receiveShadow);
     root.add(batch);
     finalOccluders.push(batch);
     for (const mesh of meshes) mesh.removeFromParent();
