@@ -45,6 +45,14 @@
   recorded firing, radio/mission progression, isolated boss activation, execution,
   death/respawn, retained progress and 390px layout. High AO/grade/FXAA renders
   with zero console/runtime errors; real pause-menu Lab access/return also pass.
+- Published release `f0abcb9`; Pages run `40921958003` built and deployed
+  successfully. Public game chunks, emblem and execution-viewer.html return HTTP
+  200. The public HTML viewer matches the tested 2,258,004-byte local artifact
+  byte-for-byte. Chromium verifies public viewer selectors/seeking and game
+  intro/deployment, all 14 decoded samples, the increased gun mix, no hostile
+  bosses at insertion and zero runtime errors. Play/view:
+  https://t4chimera.github.io/ProjectChernobyl/?v=0.5.0 and
+  https://t4chimera.github.io/ProjectChernobyl/execution-viewer.html
 
 ## 2026-10-29 — R6 reference models and recorded audio
 
