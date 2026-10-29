@@ -1,5 +1,5 @@
 const FORCES = ['Nu-7', 'Epsilon-11', 'Beta-7', 'Zeta-9'];
-const DEFAULT_SETTINGS = { blood: true, reducedMotion: false, subtitles: true, sound: true };
+const DEFAULT_SETTINGS = { blood: true, reducedMotion: false, subtitles: true, sound: true, music: true, voice: true, quality: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'balanced' : 'high' };
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const pad = value => String(value).padStart(2, '0');
 
@@ -48,7 +48,7 @@ export function createUI({ canon, onAction }) {
           <button type="button" class="deploy-button" data-action="deploy"><span>DEPLOY TO THE ZONE</span><span class="deploy-arrow" aria-hidden="true">↗</span></button>
           <div class="deploy-caption"><span class="status-dot"></span> WEAPON LIGHT ISSUED · SINGLE-PLAYER BROWSER PROTOTYPE</div>
           <div class="intro-settings" aria-label="Field settings">${settingButtons()}</div>
-          <p class="audio-note">Procedural sound / optional synthetic voices. Final character recordings pending.</p>
+          <p class="audio-note">Original ambient score · adaptive field audio · distinct synthetic voice profiles.</p>
         </div>
 
         <aside class="intro-brief" aria-label="Operation briefing">
@@ -65,7 +65,7 @@ export function createUI({ canon, onAction }) {
       <section class="play-hud" aria-label="Field display">
         <div class="hud-location"><span class="tiny-label">CURRENT LOCATION</span><strong data-ref="sector">FOUNDATION CHECKPOINT</strong><span class="location-sub"><i class="status-dot"></i> FACILITY POWER OFF <b data-ref="heading">N / 000°</b></span></div>
         <div class="mission-panel"><div class="mission-heading"><span class="radio-icon" aria-hidden="true">◖))</span><b>OVERWATCH</b><span data-ref="mission-count">01 / --</span></div><h2 data-ref="mission-title">ESTABLISH CONTACT</h2><p data-ref="mission-text">Awaiting operational instructions.</p><div class="mission-distance"><i></i><span data-ref="mission-distance">FIELD OBJECTIVE</span></div></div>
-        <div class="map-unit"><div class="map-heading"><span>TACTICAL MAP</span><b>N ↑</b></div><canvas class="minimap" width="480" height="400" aria-label="Minimap showing sectors, your position, and the active objective"></canvas><div class="map-legend"><span><i class="legend-player"></i> YOU</span><span><i class="legend-target"></i> OBJECTIVE</span><b data-ref="map-grid">CH / 06</b></div></div>
+        <div class="map-unit"><div class="map-heading"><span>TACTICAL MAP</span><b>N ↑</b></div><canvas class="minimap" width="512" height="512" aria-label="Minimap showing sectors, your position, and the active objective"></canvas><div class="map-legend"><span><i class="legend-player"></i> YOU</span><span><i class="legend-target"></i> OBJECTIVE</span><b data-ref="map-grid">CH / 06</b></div></div>
         <div class="boss-display" hidden><div><b data-ref="boss-name"></b><span data-ref="boss-class"></span></div><div class="boss-track"><i data-ref="boss-fill"></i></div><span data-ref="boss-hp"></span></div>
         <div class="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
         <div class="hit-marker" aria-hidden="true">×</div>
@@ -84,7 +84,7 @@ export function createUI({ canon, onAction }) {
       <section class="won-screen overlay-screen menu-screen" hidden aria-labelledby="won-title"><div class="overlay-dossier"><span class="eyebrow">OVERWATCH / EXTRACTION CONFIRMED</span><h2 id="won-title">SIGNAL<br>RECOVERED.</h2><p>Operational objectives complete. You made it out of the zone.</p><div class="extraction-stats"><div><b data-ref="won-missions">--</b><span>OBJECTIVES</span></div><div><b data-ref="won-bosses">--</b><span>BOSSES DEFEATED</span></div><div><b data-ref="won-time">--</b><span>FIELD TIME</span></div></div><button class="deploy-button" type="button" data-action="restart"><span>BEGIN ANOTHER OPERATION</span><span aria-hidden="true">↗</span></button><p class="small-note">End of browser prototype. The facility still has secrets.</p></div></section>
       <div class="cinematic-bars" aria-hidden="true"><div class="cinematic-top"><span>OPERATOR COMPROMISED</span><b>THIRD-PERSON / LIVE FEED</b></div><div class="cinematic-bottom"><span data-ref="execution-label">CLOSE CONTACT</span><b>OVERWATCH / SIGNAL UNSTABLE</b></div></div>
       <div class="mobile-controls"><div class="touch-look" aria-label="Drag to look"></div><div class="touch-stick" aria-label="Drag to move"><div></div></div><div class="touch-actions"><button type="button" data-touch="fire" aria-label="Fire weapon">FIRE</button><button type="button" data-touch="aim" aria-label="Aim weapon">AIM</button><button type="button" data-touch="reload" aria-label="Reload">R</button><button type="button" data-touch="interact" aria-label="Interact">E</button><button type="button" data-touch="sprint" aria-label="Sprint">RUN</button><button type="button" data-touch="crouch" aria-label="Crouch">LOW</button></div></div>
-      <footer class="intro-footer"><span>UNAUTHORIZED ACCESS PROHIBITED</span><span>BLOCKY 3D / BROWSER ADAPTATION</span><span>DEVELOPMENT BUILD <b>0.3</b></span></footer>
+      <footer class="intro-footer"><span>UNAUTHORIZED ACCESS PROHIBITED</span><span>BLOCKY 3D / BROWSER ADAPTATION</span><span>VISUAL UPDATE <b>0.4</b></span></footer>
     </div>`;
 
   const ui = root.querySelector('.game-ui');
@@ -108,8 +108,8 @@ export function createUI({ canon, onAction }) {
   const setText = (name, value) => { if (refs[name] && refs[name].textContent !== String(value)) refs[name].textContent = value; };
 
   function settingButtons() {
-    return Object.entries({ sound: 'SOUND', subtitles: 'SUBTITLES', blood: 'BLOOD FX', reducedMotion: 'REDUCED MOTION' })
-      .map(([key, label]) => `<button type="button" data-setting="${key}" aria-pressed="${DEFAULT_SETTINGS[key]}"><i aria-hidden="true"></i>${label}<b>${DEFAULT_SETTINGS[key] ? 'ON' : 'OFF'}</b></button>`).join('');
+    return Object.entries({ sound: 'MASTER SOUND', music: 'AMBIENT MUSIC', voice: 'VOICE RADIO', subtitles: 'SUBTITLES', blood: 'BLOOD FX', reducedMotion: 'REDUCED MOTION' })
+      .map(([key, label]) => `<button type="button" data-setting="${key}" aria-pressed="${DEFAULT_SETTINGS[key]}"><i aria-hidden="true"></i>${label}<b>${DEFAULT_SETTINGS[key] ? 'ON' : 'OFF'}</b></button>`).join('') + `<div class="quality-options" aria-label="Graphics quality"><span>GRAPHICS</span><button type="button" data-quality="high" aria-pressed="${DEFAULT_SETTINGS.quality === 'high'}">HIGH</button><button type="button" data-quality="balanced" aria-pressed="${DEFAULT_SETTINGS.quality === 'balanced'}">BALANCED</button></div>`;
   }
 
   function syncSettings() {
@@ -118,6 +118,7 @@ export function createUI({ canon, onAction }) {
       button.setAttribute('aria-pressed', String(enabled));
       button.querySelector('b').textContent = enabled ? 'ON' : 'OFF';
     });
+    root.querySelectorAll('[data-quality]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.quality === settings.quality)));
     ui.classList.toggle('reduced-motion', !!settings.reducedMotion);
     if (!settings.subtitles) elements.subtitle.hidden = true;
   }
@@ -144,6 +145,11 @@ export function createUI({ canon, onAction }) {
     settings[key] = !settings[key];
     syncSettings();
     action('settings', { [key]: settings[key] });
+  }));
+  root.querySelectorAll('[data-quality]').forEach(button => bind(button, 'click', () => {
+    settings.quality = button.dataset.quality;
+    syncSettings();
+    action('settings', { quality: settings.quality });
   }));
   root.querySelectorAll('[data-action]').forEach(button => bind(button, 'click', () => {
     const type = button.dataset.action;
@@ -260,47 +266,56 @@ export function createUI({ canon, onAction }) {
     if (!mapContext || !view.world || !view.player?.position) return;
     const ctx = mapContext;
     const width = mapCanvas.width, height = mapCanvas.height;
+    const cx = width / 2, cy = height / 2, radius = width * .455;
     const data = view.world.minimap;
-    const bounds = data?.bounds || { minX: -105, maxX: 85, minZ: -30, maxZ: 90 };
-    const spanX = bounds.maxX - bounds.minX, spanZ = bounds.maxZ - bounds.minZ;
-    const scale = Math.min((width - 35) / spanX, (height - 35) / spanZ);
-    const ox = (width - spanX * scale) / 2, oz = (height - spanZ * scale) / 2;
-    const mapX = x => ox + (x - bounds.minX) * scale;
-    const mapZ = z => oz + (z - bounds.minZ) * scale;
+    const player = view.player.position;
+    // A local, north-up tactical view avoids exposing distant enemies. The
+    // objective clamps to the edge when it lies beyond the local radar range.
+    const scale = radius / 31;
+    const mapX = x => cx + (x - player.x) * scale;
+    const mapZ = z => cy + (z - player.z) * scale;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#09100f'; ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = '#1b2b26'; ctx.lineWidth = 1;
-    for (let x = 0; x <= width; x += 30) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke(); }
-    for (let y = 0; y <= height; y += 30) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
-    for (const sector of view.world.sectors || []) {
-      const c = sector.center, s = sector.size;
-      if (!c || !s) continue;
-      ctx.fillStyle = '#16211c';
-      ctx.fillRect(mapX(c.x - s.x / 2), mapZ(c.z - s.z / 2), s.x * scale, s.z * scale);
-      ctx.strokeStyle = '#4d5b48'; ctx.lineWidth = 1.6;
-      ctx.strokeRect(mapX(c.x - s.x / 2), mapZ(c.z - s.z / 2), s.x * scale, s.z * scale);
-      ctx.font = 'bold 17px monospace'; ctx.fillStyle = '#7d8f73'; ctx.textAlign = 'center';
-      ctx.fillText(pad(sector.id), mapX(c.x), mapZ(c.z) + 6);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.clip();
+    const ground = ctx.createRadialGradient(cx,cy,20,cx,cy,radius);
+    ground.addColorStop(0,'rgba(13,19,18,.70)'); ground.addColorStop(1,'rgba(4,8,8,.90)');
+    ctx.fillStyle = ground; ctx.fillRect(0,0,width,height);
+    ctx.strokeStyle = 'rgba(148,163,153,.09)'; ctx.lineWidth = 1;
+    const grid = 5;
+    for(let x=Math.floor((player.x-31)/grid)*grid;x<player.x+31;x+=grid){ctx.beginPath();ctx.moveTo(mapX(x),0);ctx.lineTo(mapX(x),height);ctx.stroke();}
+    for(let z=Math.floor((player.z-31)/grid)*grid;z<player.z+31;z+=grid){ctx.beginPath();ctx.moveTo(0,mapZ(z));ctx.lineTo(width,mapZ(z));ctx.stroke();}
+    for(const sector of view.world.sectors || []) {
+      const c=sector.center,s=sector.size;if(!c||!s)continue;
+      ctx.fillStyle='rgba(88,102,91,.12)';
+      ctx.fillRect(mapX(c.x-s.x/2),mapZ(c.z-s.z/2),s.x*scale,s.z*scale);
+      ctx.strokeStyle='rgba(149,164,143,.25)';ctx.lineWidth=1.3;
+      ctx.strokeRect(mapX(c.x-s.x/2),mapZ(c.z-s.z/2),s.x*scale,s.z*scale);
+      ctx.font='bold 16px monospace';ctx.fillStyle='rgba(188,201,172,.5)';ctx.textAlign='center';
+      ctx.fillText(pad(sector.id),mapX(c.x),mapZ(c.z)+6);
     }
-    ctx.fillStyle = '#56614f';
-    for (const wall of data?.walls || []) {
-      ctx.fillRect(mapX(wall.x - wall.w / 2), mapZ(wall.z - wall.d / 2), Math.max(1, wall.w * scale), Math.max(1, wall.d * scale));
-    }
-    const target = view.mission?.targetPosition;
-    if (target) {
-      const tx = target.x ?? target[0], tz = target.z ?? target[2];
-      if (Number.isFinite(tx) && Number.isFinite(tz)) {
-        ctx.strokeStyle = '#dfb974'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(mapX(tx), mapZ(tz), 9, 0, Math.PI * 2); ctx.stroke();
-        ctx.fillStyle = '#dfb974'; ctx.fillRect(mapX(tx) - 2, mapZ(tz) - 2, 4, 4);
+    ctx.fillStyle='rgba(160,169,158,.5)';
+    for(const wall of data?.walls || [])ctx.fillRect(mapX(wall.x-wall.w/2),mapZ(wall.z-wall.d/2),Math.max(1,wall.w*scale),Math.max(1,wall.d*scale));
+    ctx.strokeStyle='rgba(158,172,154,.11)';ctx.lineWidth=1;
+    for(const fraction of [.35,.7]){ctx.beginPath();ctx.arc(cx,cy,radius*fraction,0,Math.PI*2);ctx.stroke();}
+    const target=view.mission?.targetPosition;
+    if(target){
+      let tx=mapX(target.x??target[0])-cx,tz=mapZ(target.z??target[2])-cy;
+      if(Number.isFinite(tx)&&Number.isFinite(tz)){
+        const distance=Math.hypot(tx,tz);if(distance>radius-24){tx*=((radius-24)/distance);tz*=((radius-24)/distance);}
+        ctx.save();ctx.translate(cx+tx,cy+tz);ctx.strokeStyle='#c9bd7c';ctx.lineWidth=2.4;
+        ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(9,7);ctx.lineTo(-9,7);ctx.closePath();ctx.stroke();
+        ctx.fillStyle='#c9bd7c';ctx.fillRect(-2,-2,4,4);ctx.restore();
       }
     }
-    const p = view.player.position;
-    const px = clamp(mapX(p.x), 7, width - 7), pz = clamp(mapZ(p.z), 7, height - 7);
-    ctx.save(); ctx.translate(px, pz); ctx.rotate(-(Number(view.player.yaw) || 0));
-    ctx.fillStyle = '#dce7d1'; ctx.shadowColor = '#b5d5a3'; ctx.shadowBlur = 9;
-    ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(6, 7); ctx.lineTo(0, 4); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill(); ctx.restore();
-    ctx.strokeStyle = '#425441'; ctx.strokeRect(.5, .5, width - 1, height - 1);
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(-(Number(view.player.yaw)||0));
+    ctx.fillStyle='#d3e3b3';ctx.shadowColor='#b5c9a3';ctx.shadowBlur=6;
+    ctx.beginPath();ctx.moveTo(0,-12);ctx.lineTo(7,8);ctx.lineTo(0,4);ctx.lineTo(-7,8);ctx.closePath();ctx.fill();ctx.restore();
+    ctx.restore();
+    ctx.strokeStyle='rgba(185,197,177,.55)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,radius,0,Math.PI*2);ctx.stroke();
+    ctx.strokeStyle='rgba(179,192,166,.5)';ctx.lineWidth=1;
+    for(let i=0;i<32;i++){const a=i*Math.PI/16;const inner=radius-(i%8===0?10:4);ctx.beginPath();ctx.moveTo(cx+Math.sin(a)*inner,cy-Math.cos(a)*inner);ctx.lineTo(cx+Math.sin(a)*radius,cy-Math.cos(a)*radius);ctx.stroke();}
+    ctx.fillStyle='#c2cbb4';ctx.font='bold 18px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    for(const [text,x,y]of [['N',cx,cy-radius+24],['E',cx+radius-23,cy],['S',cx,cy+radius-22],['W',cx-radius+24,cy]])ctx.fillText(text,x,y);
   }
 
   function updateBoss(view) {
@@ -310,7 +325,7 @@ export function createUI({ canon, onAction }) {
     let nearest = null, distance = 23;
     const entries = records instanceof Map ? records.values() : Object.values(records);
     for (const boss of entries) {
-      if (boss.dead || boss.hp <= 0 || !boss.position) continue;
+      if (boss.active === false || boss.dead || boss.hp <= 0 || !boss.position) continue;
       const dx = boss.position.x - position.x, dz = boss.position.z - position.z;
       const value = Math.hypot(dx, dz);
       if (value < distance) { distance = value; nearest = boss; }
@@ -327,7 +342,7 @@ export function createUI({ canon, onAction }) {
   function update(view) {
     currentView = view;
     const state = view.state || {};
-    if (view.settings) { settings = { ...settings, ...view.settings }; syncSettings(); }
+    if (view.settings && Object.keys(view.settings).some(key => settings[key] !== view.settings[key])) { settings = { ...settings, ...view.settings }; syncSettings(); }
     const hp = Math.ceil(state.hp ?? 100), maxHp = state.maxHp || 100;
     setText('health', Math.max(0, hp)); setText('force', state.force || force);
     setText('condition', hp <= 25 ? 'CRITICAL' : hp <= 50 ? 'INJURED' : 'STABLE');

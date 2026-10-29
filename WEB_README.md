@@ -14,14 +14,24 @@ Roblox Studio. It does not connect to a Roblox server or provide multiplayer.
   crouch posture, aiming, firing, reloading, and supply crates.
 - Eight canonical bosses, regular infected that respawn, and unique bosses that
   remain defeated through player redeployment within that run.
+- Ordinary infected introduce the intake route. Hostile bosses remain dormant
+  until the corresponding field objectives and previous encounters are complete;
+  approach their isolated sector to activate them. They cannot chase to insertion.
+- Weathered brick/concrete/metal surfaces, wet ground, rain, industrial entrance,
+  tactical transport, staging equipment, and sky/flashlight shadows.
+- Layered tactical armor, helmets/NVG, masks, gloves and pouches. Characters use
+  planted-foot walking, articulated knees/elbows, idle breathing and rifle grips.
 - Twenty intact-body execution variants with third-person staging/cameras;
   ordinary death also uses third-person, returning to first-person after redeploy.
 - Overwatch guides a 22-step mission chain ending in extraction. Mikoyan can be
   left peaceful and does not have to be killed to complete the operation.
 - Minimap, objective marker, health/ammunition/stamina, boss indicators,
   subtitles, sound/blood/reduced-motion settings, and touch controls.
-- Local procedural sound and optional browser-synthesized speech placeholders.
-  No actor recordings or fabricated audio asset IDs are included.
+- Original procedural eerie humming/drone score, weather and mechanical sounds,
+  footsteps, weapon/reload effects, and individually profiled speech. Dialogue
+  uses installed browser/OS voices where available; actor recordings are pending.
+- Independent music and voice toggles, plus High/Balanced graphics settings.
+  Balanced reduces rain and shadows for less powerful devices.
 
 Boss HP, exact names, voice text, and execution timeline data are exported from
 the existing Luau modules into `web/src/canon.js`. A full new run resets bosses

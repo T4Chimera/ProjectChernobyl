@@ -22,11 +22,40 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   let lastNoise = -100, lastNoisePosition = new THREE.Vector3();
   let playerData = { position: state.playerPosition, direction: new THREE.Vector3(0, 0, -1), moving: false, sprinting: false };
   let records = [], hazards = [], pendingRespawns = [], victimRig = null;
+  const completedInteractions = new Set();
   const raycaster = new THREE.Raycaster();
   const direction = new THREE.Vector3(), origin = new THREE.Vector3();
   const eye = position => position.clone().addScaledVector(up, 1.35);
   const emit = event => onEvent(event);
   const sceneRoot = new THREE.Group(); sceneRoot.name = 'EncounterActors'; scene.add(sceneRoot);
+
+  function inEncounterArea(record, position) {
+    if (!record.encounter) return true;
+    const sector = world.sectors?.find(item => item.id === record.encounter.sector);
+    if (!sector) return false;
+    // Unique encounters stay inside their own hall rather than pursuing the
+    // player through the connecting roads and back to the insertion checkpoint.
+    return Math.abs(position.x - sector.center.x) <= sector.size.x / 2 - 0.6
+      && Math.abs(position.z - sector.center.z) <= sector.size.z / 2 - 0.6;
+  }
+
+  function tetherDistance(record) {
+    return record.encounter?.leashRadius ?? (record.settings.HomeTether || enemyConfig.HomeTether) * SCALE;
+  }
+
+  function activateEncounters() {
+    for (const record of state.bosses.values()) {
+      if (record.active || record.dead || !record.encounter) continue;
+      const encounter = record.encounter;
+      if (!(encounter.prerequisites || []).every(id => completedInteractions.has(id))) continue;
+      if (!(encounter.requiresBosses || []).every(id => state.deadBosses.has(id))) continue;
+      if (!inEncounterArea(record, state.playerPosition)) continue;
+      if (distanceXZ(record.home, state.playerPosition) > (encounter.activationDistance ?? 27)) continue;
+      record.active = true; record.state = 'Patrol'; record.mesh.visible = true;
+      record.nextAttack = clock + 1.2; record.nextNearby = clock + 3;
+      record.hairSpawnUntil = clock + 3;
+    }
+  }
 
   function clearLine(from, to, padding = 0.08) {
     const delta = direction.subVectors(to, from);
@@ -36,7 +65,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     return raycaster.intersectObjects(world.occluders, false).length === 0;
   }
 
-  function walkable(x, z, radius = 0.3) {
+  function walkable(x, z, radius = 0.36) {
     for (const box of world.colliders) {
       if (box.max.y < 0.38 || box.min.y > 1.6) continue;
       if (x + radius > box.min.x && x - radius < box.max.x && z + radius > box.min.z && z - radius < box.max.z) return false;
@@ -52,7 +81,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   const key = (x, z) => `${x},${z}`;
   const cellWalkable = (x, z) => {
     const cell = key(x, z);
-    if (!walkCache.has(cell)) walkCache.set(cell, walkable(x * CELL, z * CELL, 0.33));
+    if (!walkCache.has(cell)) walkCache.set(cell, walkable(x * CELL, z * CELL, 0.4));
     return walkCache.get(cell);
   };
   function findPath(start, destination) {
@@ -92,6 +121,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   }
 
   function speak(record, category) {
+    if (!record.active) return;
     const voices = canon.Voices;
     const voice = voices.Voices[record.id];
     if (!voice || (voice.Proposed && !voices.AllowProposed)) return;
@@ -109,8 +139,10 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     const definition = canon.Bosses[id];
     const settings = definition ? enemyConfig.Bosses[id] : enemyConfig.Infected;
     const rig = createActor(id, definition, settings);
-    rig.mesh.position.copy(position); rig.mesh.position.y = 0.24;
+    // Actor geometry uses the soles as its origin; no artificial hover offset.
+    rig.mesh.position.copy(position); rig.mesh.position.y = 0;
     sceneRoot.add(rig.mesh);
+    const encounter = id === 'Mikoyan' ? null : world.bossEncounters?.[id];
     const record = {
       id, rig, mesh: rig.mesh, position: rig.mesh.position, home: position.clone(),
       hp: definition?.MaxHealth || settings.MaxHealth, maxHp: definition?.MaxHealth || settings.MaxHealth,
@@ -121,7 +153,12 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       nextAttack: clock + 1, nextPuddle: clock + 8, nextNearby: clock + 5 + Math.random() * 9,
       nextPatrol: clock + Math.random() * 4, patrol: position.clone(), nextPath: 0, path: [],
       moving: false, deathAt: null, hairSpawnUntil: clock + 3,
+      moveDestination: null, moveFlee: false, moveStopDistance: 0.25,
+      facingYaw: null, motion: { speed: 0, distance: 0, heading: 0 },
+      nextLineCheck: 0, lineClear: false, lineDestination: null, lineOrigin: null,
+      encounter, active: !encounter,
     };
+    if (!record.active) { record.state = 'Dormant'; rig.mesh.visible = false; }
     rig.hitMeshes.forEach(mesh => { mesh.userData.entity = record; });
     records.push(record);
     if (record.boss) state.bosses.set(id, record); else state.infected.push(record);
@@ -131,6 +168,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   function kill(record) {
     if (record.dead) return;
     record.dead = true; record.hp = 0; record.deathAt = clock; record.pose = 'Death'; record.state = 'Dead';
+    record.moveDestination = null; record.moving = false; record.motion.speed = 0;
     if (state.execution?.record === record) endExecution(false);
     state.kills++;
     if (record.boss) {
@@ -143,7 +181,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   }
 
   function damageActor(record, amount, shooterIsPlayer = false) {
-    if (record.dead || !Number.isFinite(amount) || amount <= 0) return false;
+    if (!record.active || record.dead || !Number.isFinite(amount) || amount <= 0) return false;
     record.hp = Math.max(0, record.hp - amount);
     if (shooterIsPlayer) {
       if (record.id !== 'Mikoyan' || world.mikoyanRoom.containsPoint(eye(state.playerPosition))) {
@@ -176,13 +214,14 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   function showVictim() {
     if (!victimRig) { victimRig = createActor('Player', null, { WeaponName: 'PrototypeRifle' }); sceneRoot.add(victimRig.mesh); }
     victimRig.mesh.visible = true; victimRig.mesh.position.copy(state.playerPosition);
+    victimRig.mesh.position.y = 0;
     victimRig.mesh.rotation.y = Math.atan2(-playerData.direction.x, -playerData.direction.z);
   }
 
   function beginExecution(record) {
     const choices = canon.Executions.Bosses[record.id];
     if (!choices?.length || state.execution || state.mode === 'tour' || clock < immunityUntil) return false;
-    if (state.hp <= 0 || state.hp > canon.Executions.MaxVictimHealth) return false;
+    if (state.hp <= 0 || state.hp > canon.Executions.MaxVictimHealth || state.playerPosition.y > 0.18) return false;
     if (distanceXZ(record.position, state.playerPosition) > canon.Executions.Range * SCALE) return false;
     if (!clearLine(eye(record.position), eye(state.playerPosition))) return false;
     const variant = randomItem(choices);
@@ -191,7 +230,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     victimRig.mesh.rotation.y = Math.atan2(state.playerPosition.x - record.position.x, state.playerPosition.z - record.position.z);
     state.execution = { attacker: record.mesh, variant: variant.Id, duration: variant.Duration, elapsed: 0,
       victim: victimRig.mesh, record, timeline: variant.Beats, beatIndex: 0, victimPose: 'Guard' };
-    record.state = 'Executing'; record.moving = false;
+    record.state = 'Executing'; record.moving = false; record.moveDestination = null; record.motion.speed = 0;
     speak(record, 'Execution');
     emit({ type: 'execution-start', variant: variant.Id });
     return true;
@@ -228,21 +267,51 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     if (execution.elapsed >= execution.duration) endExecution(true);
   }
 
-  function move(record, destination, dt, flee = false) {
-    let desired = destination.clone(); desired.y = record.position.y;
+  // AI only requests a destination. The continuous movement integrator below
+  // advances roots every frame rather than teleporting them on 0.16s AI ticks.
+  function move(record, destination, _dt, flee = false, stopDistance = 0.25) {
+    const desired = destination.clone(); desired.y = 0;
     if (record.id === 'Mikoyan') {
       desired.x = THREE.MathUtils.clamp(desired.x, world.mikoyanRoom.min.x + 0.6, world.mikoyanRoom.max.x - 0.6);
       desired.z = THREE.MathUtils.clamp(desired.z, world.mikoyanRoom.min.z + 0.6, world.mikoyanRoom.max.z - 0.6);
     }
-    const tether = (record.settings.HomeTether || enemyConfig.HomeTether) * SCALE;
+    const tether = tetherDistance(record);
     const fromHome = desired.clone().sub(record.home); fromHome.y = 0;
     if (fromHome.length() > tether) desired.copy(record.home).add(fromHome.setLength(tether));
-    let difference = desired.clone().sub(record.position); difference.y = 0;
-    if (difference.length() < 0.25) { record.moving = false; return; }
-    const stepDistance = record.settings.WalkSpeed * SCALE * dt * (flee ? 1.1 : 1);
-    const step = difference.clone().normalize().multiplyScalar(Math.min(stepDistance, difference.length()));
-    const directlyWalkable = clearLine(record.position.clone().setY(0.8), desired.clone().setY(0.8), 0.25)
-      && walkable(record.position.x + step.x, record.position.z + step.z);
+    if (record.encounter) {
+      const sector = world.sectors.find(item => item.id === record.encounter.sector);
+      desired.x = THREE.MathUtils.clamp(desired.x, sector.center.x - sector.size.x / 2 + 0.8, sector.center.x + sector.size.x / 2 - 0.8);
+      desired.z = THREE.MathUtils.clamp(desired.z, sector.center.z - sector.size.z / 2 + 0.8, sector.center.z + sector.size.z / 2 - 0.8);
+    }
+    desired.y = 0;
+    record.moveDestination = desired;
+    record.moveFlee = flee;
+    record.moveStopDistance = stopDistance;
+  }
+
+  function advanceMovement(record, dt) {
+    record.position.y = 0;
+    record.moving = false;
+    record.motion.speed = 0;
+    const desired = record.moveDestination;
+    if (!desired || !record.active || record.dead || state.execution?.record === record || dt <= 0) return;
+    const difference = desired.clone().sub(record.position); difference.y = 0;
+    const remaining = difference.length();
+    if (remaining <= record.moveStopDistance + 0.015) return;
+    const stepDistance = record.settings.WalkSpeed * SCALE * dt * (record.moveFlee ? 1.1 : 1);
+    const step = difference.clone().normalize().multiplyScalar(Math.min(stepDistance, remaining - record.moveStopDistance));
+    // Static scenery does not require a full triangle raycast at render rate.
+    // Refresh on changed goals, meaningful travel, or the normal AI cadence;
+    // collision sweeps still validate every actual frame of displacement.
+    if (clock >= record.nextLineCheck || !record.lineDestination
+      || distanceXZ(record.lineDestination, desired) > 0.2
+      || distanceXZ(record.lineOrigin, record.position) > 1.25) {
+      record.lineClear = clearLine(record.position.clone().setY(0.8), desired.clone().setY(0.8), 0.25);
+      record.lineDestination = desired.clone();
+      record.lineOrigin = record.position.clone();
+      record.nextLineCheck = clock + 0.18;
+    }
+    const directlyWalkable = record.lineClear && walkable(record.position.x + step.x, record.position.z + step.z);
     if (!directlyWalkable) {
       if (clock >= record.nextPath && clock >= nextPathJob) {
         record.path = findPath(record.position, desired);
@@ -251,17 +320,36 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       while (record.path.length && distanceXZ(record.position, record.path[0]) < 0.45) record.path.shift();
       if (record.path.length) {
         difference.subVectors(record.path[0], record.position); difference.y = 0;
-        step.copy(difference).normalize().multiplyScalar(Math.min(stepDistance, difference.length()));
-      }
+        step.copy(difference).normalize().multiplyScalar(Math.min(stepDistance, Math.max(0, difference.length() - 0.04)));
+      } else step.set(0, 0, 0);
     } else record.path = [];
     const before = record.position.clone();
-    if (walkable(record.position.x + step.x, record.position.z)) record.position.x += step.x;
-    if (walkable(record.position.x, record.position.z + step.z)) record.position.z += step.z;
-    record.moving = distanceXZ(before, record.position) > 0.005;
-    if (record.moving) {
-      const yaw = Math.atan2(-step.x, -step.z);
-      record.mesh.rotation.y += Math.atan2(Math.sin(yaw - record.mesh.rotation.y), Math.cos(yaw - record.mesh.rotation.y)) * Math.min(1, dt * 11);
+    // Small collision sweeps prevent fast actors from stepping through thin
+    // scenery; blocking all displacement also stops their walking animation.
+    const divisions = Math.max(1, Math.ceil(step.length() / 0.11));
+    const nextPosition = record.position.clone();
+    for (let i = 0; i < divisions; i++) {
+      nextPosition.set(record.position.x + step.x / divisions, 0, record.position.z);
+      if (inEncounterArea(record, nextPosition) && distanceXZ(nextPosition, record.home) <= tetherDistance(record)
+        && walkable(nextPosition.x, nextPosition.z)) record.position.x = nextPosition.x;
+      nextPosition.set(record.position.x, 0, record.position.z + step.z / divisions);
+      if (inEncounterArea(record, nextPosition) && distanceXZ(nextPosition, record.home) <= tetherDistance(record)
+        && walkable(nextPosition.x, nextPosition.z)) record.position.z = nextPosition.z;
     }
+    const travelled = distanceXZ(before, record.position);
+    record.moving = travelled > 0.0001;
+    record.motion.speed = travelled / dt;
+    record.motion.distance += travelled;
+    if (record.moving) {
+      record.facingYaw = Math.atan2(before.x - record.position.x, before.z - record.position.z);
+    }
+  }
+
+  function turnActor(record, dt) {
+    if (record.facingYaw === null || record.dead || state.execution?.record === record) return;
+    const difference = record.facingYaw - record.mesh.rotation.y;
+    record.mesh.rotation.y += Math.atan2(Math.sin(difference), Math.cos(difference)) * (1 - Math.exp(-dt * 12));
+    record.motion.heading = record.mesh.rotation.y;
   }
 
   function addPuddle(record) {
@@ -277,14 +365,14 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
   }
 
   function eligible(record) {
-    if (state.execution || state.phase !== 'playing') return false;
+    if (!record.active || state.execution || state.phase !== 'playing' || !inEncounterArea(record, state.playerPosition)) return false;
     if (record.id === 'Mikoyan' && (!record.provoked || !world.mikoyanRoom.containsPoint(eye(state.playerPosition)))) return false;
-    return distanceXZ(record.home, state.playerPosition) < (record.settings.HomeTether || enemyConfig.HomeTether) * SCALE;
+    return distanceXZ(record.home, state.playerPosition) < tetherDistance(record);
   }
 
   function ai(record, dt) {
-    if (record.dead || state.execution?.record === record) return;
-    record.moving = false;
+    if (!record.active || record.dead || state.execution?.record === record) return;
+    record.moveDestination = null;
     if (record.id === 'Mikoyan' && !record.provoked) { record.pose = 'Sit'; record.state = 'Peaceful'; return; }
     let targetPosition = null, targetRecord = null, targetIsPlayer = false;
     const playerDistance = distanceXZ(record.position, state.playerPosition);
@@ -293,13 +381,14 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       && clearLine(eye(record.position), eye(state.playerPosition));
     if (seesPlayer) { targetPosition = state.playerPosition; targetIsPlayer = true; }
     if (record.id === 'Felon' && !targetPosition) {
-      const infected = state.infected.filter(other => !other.dead && distanceXZ(other.position, record.position) < 9 && clearLine(eye(record.position), eye(other.position)));
+      const infected = state.infected.filter(other => !other.dead && inEncounterArea(record, other.position)
+        && distanceXZ(other.position, record.position) < 9 && clearLine(eye(record.position), eye(other.position)));
       infected.sort((a, b) => distanceXZ(a.position, record.position) - distanceXZ(b.position, record.position));
       if (infected[0]) { targetRecord = infected[0]; targetPosition = targetRecord.position; }
     }
     if (record.id === 'Katya' || record.id === 'Sukhoi') {
       const partner = state.bosses.get(record.id === 'Katya' ? 'Sukhoi' : 'Katya');
-      if (partner && !partner.dead && distanceXZ(partner.position, record.position) < enemyConfig.RelationshipRange * SCALE
+      if (partner?.active && !partner.dead && distanceXZ(partner.position, record.position) < enemyConfig.RelationshipRange * SCALE
         && clearLine(eye(record.position), eye(partner.position))) {
         if (record.id === 'Sukhoi' && enemyConfig.KatyaSukhoiResponse === 'Flee') {
           const away = record.position.clone().sub(partner.position).normalize().multiplyScalar(7).add(record.position);
@@ -310,7 +399,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     }
     if (record.settings.Partner) {
       const partner = state.bosses.get(record.settings.Partner);
-      if (partner && !partner.dead && distanceXZ(partner.position, record.position) < 6) record.recognizedPartner = record.settings.Partner;
+      if (partner?.active && !partner.dead && distanceXZ(partner.position, record.position) < 6) record.recognizedPartner = record.settings.Partner;
     }
     if (targetPosition) {
       if (record.target !== (targetRecord || 'player')) speak(record, 'PlayerDetected');
@@ -318,12 +407,12 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       record.state = 'Chase';
       const distance = distanceXZ(record.position, targetPosition);
       if (record.id === 'Katya' && targetIsPlayer && distance < 8.5) addPuddle(record);
+      record.facingYaw = Math.atan2(record.position.x - targetPosition.x, record.position.z - targetPosition.z);
       const meleeRange = record.settings.MeleeRange * SCALE;
       const ranged = !!record.settings.Ranged && distance > meleeRange;
       const attackRange = ranged ? record.settings.Range * SCALE : meleeRange;
       if (distance <= attackRange && clock >= record.nextAttack) {
         record.nextAttack = clock + record.settings.AttackSeconds;
-        record.mesh.rotation.y = Math.atan2(record.position.x - targetPosition.x, record.position.z - targetPosition.z);
         if (!ranged && record.boss && targetIsPlayer && beginExecution(record)) return;
         record.pose = ranged ? 'Fire' : 'Attack'; record.poseUntil = clock + 0.55; record.state = 'Attack';
         const damage = ranged ? record.settings.Damage : (record.settings.MeleeDamage || record.settings.Damage);
@@ -335,9 +424,11 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
           record.pendingHit = { at: clock + 0.3, targetRecord, targetIsPlayer, damage };
         }
       }
-      if (distance > (ranged ? Math.min(attackRange * 0.7, 12) : meleeRange * 0.76)) move(record, targetPosition, dt);
+      const stoppingDistance = ranged ? Math.min(attackRange * 0.7, 12) : meleeRange * 0.76;
+      if (distance > stoppingDistance) move(record, targetPosition, dt, false, stoppingDistance);
     } else {
       if (record.target) { speak(record, 'LostTarget'); record.target = null; }
+      if (!canTarget) record.lastKnown = null;
       let heard = null;
       if (canTarget) {
         const hearing = (playerData.sprinting ? enemyConfig.SprintHearingDistance : enemyConfig.HearingDistance) * SCALE;
@@ -376,6 +467,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     hazards.forEach(hazard => { hazard.mesh.removeFromParent(); hazard.mesh.geometry.dispose(); hazard.mesh.material.dispose(); });
     if (victimRig) { disposeActor(victimRig); victimRig = null; }
     records = []; hazards = []; pendingRespawns = []; state.bosses.clear(); state.infected = [];
+    completedInteractions.clear();
     state.deadBosses.clear(); state.kills = 0; state.bossKills = 0; state.execution = null;
     state.hp = 100; state.ammo = gun.MagazineSize; state.reserve = gun.ReserveAmmo; state.reloading = false;
     state.phase = 'briefing'; clock = 0; nextFire = 0; reloadUntil = 0; immunityUntil = 0;
@@ -397,7 +489,7 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
     lastNoise = clock; lastNoisePosition.copy(state.playerPosition);
     scene.updateMatrixWorld(true);
     raycaster.set(from, aim.clone().normalize()); raycaster.near = 0.02; raycaster.far = gun.Range * SCALE;
-    const candidates = world.occluders.concat(records.filter(record => !record.dead).flatMap(record => record.rig.hitMeshes));
+    const candidates = world.occluders.concat(records.filter(record => record.active && !record.dead).flatMap(record => record.rig.hitMeshes));
     const hits = raycaster.intersectObjects(candidates, false);
     const first = hits[0];
     let didHit = false;
@@ -425,6 +517,8 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       state.reloading = false; reloadUntil = 0;
       emit({ type: 'resupply' });
     }
+    completedInteractions.add(id);
+    activateEncounters();
     emit({ type: 'interaction', id }); return true;
   }
 
@@ -445,7 +539,15 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       if (!state.execution && state.phase === 'playing') state.playerPosition.copy(player.position);
     }
     clock += dt;
+    // A flat traversable floor is the common origin for player, NPC and staging
+    // rigs. Keep external test/debug repositioning from reintroducing hovering.
+    for (const record of records) {
+      record.position.y = 0;
+      record.moving = false;
+      record.motion.speed = 0;
+    }
     if (state.phase === 'playing') {
+      activateEncounters();
       if (state.reloading && clock >= reloadUntil) {
         const transferred = Math.min(gun.MagazineSize - state.ammo, state.reserve);
         state.ammo += transferred; state.reserve -= transferred; state.reloading = false; reloadUntil = 0;
@@ -467,7 +569,13 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
       if (aiAccumulator >= 0.16) {
         const tick = aiAccumulator; aiAccumulator = 0;
         // Actors outside the active vicinity remain in their fixed encounter area.
-        for (const record of records) if (!record.dead && distanceXZ(record.position, state.playerPosition) < 48) ai(record, tick);
+        for (const record of records) if (record.active && !record.dead && distanceXZ(record.position, state.playerPosition) < 48) ai(record, tick);
+      }
+      for (const record of records) {
+        if (record.active && !record.dead && distanceXZ(record.position, state.playerPosition) < 48) {
+          advanceMovement(record, dt);
+          turnActor(record, dt);
+        } else { record.moving = false; record.motion.speed = 0; }
       }
       for (let i = pendingRespawns.length - 1; i >= 0; i--) if (clock >= pendingRespawns[i].at) {
         const ticket = pendingRespawns.splice(i, 1)[0];
@@ -495,10 +603,14 @@ export function createGameplay({ scene, world, canon, onEvent = () => {} }) {
         if (!record.disposed) { disposeActor(record.rig); record.disposed = true; }
         continue;
       }
+      // Fog hides distant figures. Keep simulation/session and hit geometry
+      // intact, while omitting their many articulated draw calls and pose work.
+      record.mesh.visible = record.active && (state.execution?.record === record || distanceXZ(record.position, state.playerPosition) < 64);
+      if (!record.mesh.visible) continue;
       let pose = record.dead ? 'Death' : record.pose;
       if (!record.dead && state.execution?.record !== record && clock >= record.poseUntil && record.pose !== 'Sit') pose = record.moving ? 'Walk' : 'Idle';
       if (record.id === 'Mikoyan' && record.state === 'Peaceful') pose = 'Sit';
-      animateActor(record.rig, pose, clock, dt, record.moving);
+      animateActor(record.rig, pose, clock, dt, record.moving, record.motion);
       if (record.rig.tag) record.rig.tag.visible = !record.dead && distanceXZ(record.position, state.playerPosition) < 24;
     }
     records = records.filter(record => !(record.disposed && !record.boss));

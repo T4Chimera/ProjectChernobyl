@@ -5,6 +5,9 @@ import {createGameplay} from './gameplay.js';
 import {createUI} from './ui.js';
 import {MissionDirector} from './missions.js';
 import {createAudio} from './audio.js';
+import {createWeaponView} from './weapon-view.js';
+import {createAtmosphere} from './atmosphere.js';
+import {createActor,animateActor} from './actors.js';
 import './style.css';
 
 const canvas=document.querySelector('#game-canvas');
@@ -23,15 +26,19 @@ renderer.toneMappingExposure=1.05;
 renderer.shadowMap.enabled=true;
 renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0x080e0d);
-scene.fog=new THREE.FogExp2(0x101c18,.009);
-scene.add(new THREE.HemisphereLight(0x8da99e,0x27342b,.9));
-const moon=new THREE.DirectionalLight(0x9ebcbd,.45);moon.position.set(-50,90,20);scene.add(moon);
+scene.background=new THREE.Color(0x11151b);
+scene.fog=new THREE.FogExp2(0x1b2128,.012);
+scene.add(new THREE.HemisphereLight(0x9ba7b7,0x252323,.74));
+const moon=new THREE.DirectionalLight(0xc2cbd7,.85);
+moon.position.set(-95,42,18);moon.target.position.set(-75,0,0);scene.add(moon,moon.target);
+moon.shadow.mapSize.set(1536,1536);moon.shadow.camera.left=-42;moon.shadow.camera.right=42;
+moon.shadow.camera.top=42;moon.shadow.camera.bottom=-42;moon.shadow.camera.near=1;moon.shadow.camera.far=120;
+moon.shadow.normalBias=.045;moon.shadow.bias=-.0001;
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.045,260);
 camera.rotation.order='YXZ';scene.add(camera);
 const world=createWorld(scene,canon);
 const audio=createAudio();
-const settings={blood:true,subtitles:true,sound:true,reducedMotion:false};
+const settings={blood:true,subtitles:true,sound:true,reducedMotion:false,music:true,voice:true,quality:matchMedia('(pointer: coarse)').matches?'balanced':'high'};
 const keys=new Set(),touch={forward:0,right:0};
 const player={position:world.spawn.clone(),direction:new THREE.Vector3(1,0,0),moving:false,sprinting:false,crouching:false,mode:'operative'};
 player.position.y=0;
@@ -51,12 +58,12 @@ const missionDirector=new MissionDirector((mission,complete)=>{
 const game=createGameplay({scene,world,canon,onEvent:event=>{
   if(!ui)return;
   ui.event(event);
-  if(event.type==='subtitle'&&settings.sound)audio.speak(event.text,event.speaker);
+  if(event.type==='subtitle'&&settings.sound&&settings.voice)audio.speak(event.text,event.speaker);
   if(event.type==='interaction'||event.type==='boss-defeated')missionDirector.observe(event);
   if(event.type==='shot'){trace(event.origin,event.position);if(!event.own)audio.tone(100,.07,'triangle',.15);}
   if(event.type==='blood'&&settings.blood)specks(event.position);
   if(event.type==='hurt'){lastHurt=runtime;audio.hurt();}
-  if(event.type==='reload'){reloadStart=runtime;audio.tone(190,.1,'triangle',.3);}
+  if(event.type==='reload'){reloadStart=runtime;audio.reload();}
   if(event.type==='reload-complete')audio.tone(260,.08,'triangle',.25);
   if(event.type==='resupply'){audio.radio();ui.event({type:'notice',text:'AMMUNITION RESUPPLIED',duration:2});}
   if(event.type==='boss-defeated')ui.event({type:'notice',text:`${canon.Bosses[event.id].NameTag} / CONTAINED FOR THIS RUN`,duration:5});
@@ -68,36 +75,37 @@ function announceMission(mission){
   if(!mission||!ui)return;
   audio.radio();
   ui.event({type:'subtitle',speaker:'Overwatch',text:mission.text,duration:10});
-  audio.speak(mission.text,'Overwatch',true);
+  if(settings.voice)audio.speak(mission.text,'Overwatch',true);
 }
 
-const weapon=new THREE.Group();camera.add(weapon);
-const gunMat=new THREE.MeshStandardMaterial({color:0x26322d,roughness:.55,metalness:.7});
-const darkMat=new THREE.MeshStandardMaterial({color:0x121a16,roughness:.75});
-const sleeveMat=new THREE.MeshStandardMaterial({color:0x454d37,roughness:1});
-const magazine=new THREE.Group();weapon.add(magazine);
-function gunPart(name,size,pos,mat=gunMat,parent=weapon){
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),mat);mesh.name=name;mesh.position.set(...pos);mesh.castShadow=false;parent.add(mesh);return mesh;
+const weaponView=createWeaponView(camera);
+const weapon=weaponView.group,flash=weaponView.flash;
+const firstPersonBody=createActor('Player',null,{});
+firstPersonBody.mesh.name='LocalOperatorLegs';scene.add(firstPersonBody.mesh);
+for(const child of firstPersonBody.body.children)child.visible=child===firstPersonBody.rHip||child===firstPersonBody.lHip;
+const checkpointOperator=createActor('Player',null,{WeaponName:'PrototypeRifle'});
+checkpointOperator.mesh.name='FoundationCheckpointOperator';
+checkpointOperator.mesh.position.set(world.spawn.x+5.5,0,-1.45);checkpointOperator.mesh.rotation.y=1.7;
+scene.add(checkpointOperator.mesh);
+world.colliders.push(new THREE.Box3(new THREE.Vector3(world.spawn.x+5.05,0,-1.8),new THREE.Vector3(world.spawn.x+5.95,1.8,-1.1)));
+const atmosphere=createAtmosphere(scene,world,renderer);
+// The operator's light remains visible during takedowns after the first-person
+// viewmodel is hidden. It catches both intact silhouettes in the dark hall.
+const stagedLight=new THREE.SpotLight(0xffedd2,70,14,.95,.8,1);
+stagedLight.visible=false;scene.add(stagedLight,stagedLight.target);
+let appliedQuality=null,lastShadowCenter=new THREE.Vector3(Infinity,0,0),stepDistance=0;
+function applyQuality(){
+  if(appliedQuality===settings.quality)return;
+  appliedQuality=settings.quality;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,settings.quality==='balanced'?1:1.7));
+  renderer.setSize(innerWidth,innerHeight);
+  moon.castShadow=settings.quality==='high';
+  const resolution=settings.quality==='high'?1024:512;
+  flash.shadow.mapSize.set(resolution,resolution);
+  if(flash.shadow.map){flash.shadow.map.dispose();flash.shadow.map=null;}
+  flash.shadow.needsUpdate=true;atmosphere.setQuality(settings.quality);
 }
-gunPart('receiver',[.15,.19,.67],[0,0,0]);
-gunPart('handguard',[.14,.16,.54],[0,.01,-.55]);
-gunPart('barrel',[.045,.045,.43],[0,.04,-1.02],darkMat);
-gunPart('stock',[.14,.21,.42],[0,0,.48],darkMat);
-gunPart('grip',[.12,.26,.14],[0,-.2,.18],darkMat).rotation.x=-.2;
-gunPart('magazine',[.13,.32,.2],[0,-.25,-.1],darkMat,magazine);
-gunPart('front-sight',[.025,.1,.045],[0,.15,-.8],darkMat);
-gunPart('rear-sight-left',[.02,.11,.055],[-.045,.15,.07],darkMat);
-gunPart('rear-sight-right',[.02,.11,.055],[.045,.15,.07],darkMat);
-gunPart('right-sleeve',[.17,.21,.6],[.16,-.22,.4],sleeveMat).rotation.y=-.2;
-gunPart('left-sleeve',[.17,.21,.58],[-.16,-.21,-.31],sleeveMat).rotation.y=.25;
-const lamp=gunPart('permanent-weapon-lamp',[.11,.11,.23],[.15,.015,-.65],darkMat);
-const lens=new THREE.Mesh(new THREE.CircleGeometry(.043,12),new THREE.MeshBasicMaterial({color:0xe1efc5}));lens.position.set(.15,.015,-.77);weapon.add(lens);
-const flash=new THREE.SpotLight(0xe3efd0,140,canon.Weapon.FlashlightRange*.55,.5,.65,1);
-flash.position.set(.15,.015,-.76);flash.castShadow=true;flash.shadow.mapSize.set(768,768);
-flash.shadow.bias=-.00025;weapon.add(flash);
-const beamTarget=new THREE.Object3D();beamTarget.position.set(.15,.015,-20);weapon.add(beamTarget);flash.target=beamTarget;
-const muzzle=new THREE.Mesh(new THREE.OctahedronGeometry(.075),new THREE.MeshBasicMaterial({color:0xffde97}));muzzle.position.set(0,.04,-1.27);weapon.add(muzzle);muzzle.visible=false;
-
+applyQuality();
 // Gameplay owns the single intact victim rig for executions and ordinary death.
 
 function trace(from,to){
@@ -119,6 +127,7 @@ function blocked(position){
   return world.colliders.some(box=>position.y+1.45>box.min.y&&position.y<box.max.y-.12&&position.x+radius>box.min.x&&position.x-radius<box.max.x&&position.z+radius>box.min.z&&position.z-radius<box.max.z);
 }
 function movePlayer(dt){
+  const from=player.position.clone();
   const forward=(keys.has('KeyW')?1:0)-(keys.has('KeyS')?1:0)+touch.forward;
   const right=(keys.has('KeyD')?1:0)-(keys.has('KeyA')?1:0)+touch.right;
   const moving=Math.hypot(forward,right)>.05;
@@ -131,6 +140,8 @@ function movePlayer(dt){
   if(vector.length()>1)vector.normalize();vector.multiplyScalar(speed*dt);
   const next=player.position.clone();next.x+=vector.x;if(!blocked(next))player.position.x=next.x;
   next.copy(player.position);next.z+=vector.z;if(!blocked(next))player.position.z=next.z;
+  player.moving=Math.hypot(player.position.x-from.x,player.position.z-from.z)>.0001;
+  player.sprinting=sprint&&player.moving;
   verticalVelocity-=15*dt;
   const nextY=Math.max(0,player.position.y+verticalVelocity*dt);
   if(verticalVelocity>0){next.copy(player.position);next.y=nextY;if(blocked(next))verticalVelocity=0;else player.position.y=nextY;}
@@ -145,7 +156,7 @@ function lock(){
 }
 function pause(){
   if(!started||game.state.phase!=='playing')return;
-  paused=true;releaseControls();ui.showScreen('pause');document.exitPointerLock?.();
+  paused=true;releaseControls();audio.stop();ui.showScreen('pause');document.exitPointerLock?.();
 }
 function resume(){
   if(game.state.phase!=='playing')return;
@@ -173,7 +184,7 @@ ui=createUI({canon,onAction:action=>{
     case'pause':pause();break;
     case'respawn':game.respawn();player.position.copy(world.spawn);player.position.y=0;player.crouching=false;stamina=100;exhausted=false;verticalVelocity=0;recoil=shotKick=0;releaseControls();resume();announceMission(missionDirector.current());break;
     case'restart':newRun(game.state.force,game.state.mode);break;
-    case'settings':Object.assign(settings,action.value);audio.setEnabled(settings.sound);break;
+    case'settings':Object.assign(settings,action.value);audio.setEnabled(settings.sound);audio.setMix({music:settings.music,voice:settings.voice});applyQuality();break;
     case'interact':interact();break;
     case'reload':if(!paused)game.reload();break;
     case'fire-start':firing=true;break;
@@ -246,6 +257,7 @@ function frame(now){
   requestAnimationFrame(frame);
   const dt=Math.min(.05,Math.max(.001,(now-last)/1000));last=now;runtime+=dt;fps+=((1/dt)-fps)*.03;
   const playing=started&&!paused&&game.state.phase==='playing';
+  const previousPosition=player.position.clone();
   if(playing&&!game.state.execution){movePlayer(dt);}
   player.direction.set(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch));
   if(started&&(!paused||game.state.phase==='dead'))game.update(dt,player);
@@ -262,13 +274,33 @@ function frame(now){
     camera.fov+=(targetFov-camera.fov)*Math.min(1,dt*12);camera.updateProjectionMatrix();
   }
   weapon.visible=started&&cameraMode==='first-person'&&game.state.phase==='playing';
+  stagedLight.visible=cameraMode==='execution'||cameraMode==='third-person-death';
+  if(stagedLight.visible){
+    stagedLight.position.copy(player.position).add(new THREE.Vector3(.35,.45,.25));
+    const contact=game.state.execution?.attacker.position??player.position;
+    stagedLight.target.position.copy(contact).add(new THREE.Vector3(0,1.05,0));
+    stagedLight.target.updateMatrixWorld();
+  }
   if(weapon.visible){
-    const dip=game.state.reloading?Math.sin(Math.min(1,(runtime-reloadStart)/canon.Weapon.ReloadSeconds)*Math.PI):0;
-    const aim=aiming?1:0;
-    weapon.position.lerp(new THREE.Vector3(.38*(1-aim),-.35+aim*.20-dip*.17,-.58+shotKick),Math.min(1,dt*14));
-    weapon.rotation.set(-dip*.25,0,dip*.33);magazine.position.y=-dip*.12;
-    muzzle.visible=runtime-lastShot<.045;shotKick*=Math.exp(-dt*16);
-    flash.visible=true;
+    weaponView.update(dt,{aiming,reloading:game.state.reloading,time:runtime,kick:shotKick,moving:playing&&player.moving?1:0,sprinting:player.sprinting,reducedMotion:settings.reducedMotion,shotAge:runtime-lastShot});
+    shotKick*=Math.exp(-dt*16);
+  }
+  firstPersonBody.mesh.visible=weapon.visible&&pitch<-.4;
+  firstPersonBody.mesh.position.copy(player.position);firstPersonBody.mesh.rotation.y=yaw;
+  animateActor(firstPersonBody,playing&&player.moving?'Walk':'Idle',runtime,dt,playing&&player.moving);
+  animateActor(checkpointOperator,'Guard',runtime,dt,false);
+  atmosphere.update(dt,runtime,started?player.position:world.spawn,settings);
+  if(player.position.distanceTo(lastShadowCenter)>6){
+    lastShadowCenter.copy(player.position);moon.position.copy(player.position).add(new THREE.Vector3(-23,42,18));
+    moon.target.position.copy(player.position);moon.target.updateMatrixWorld();
+  }
+  if(playing){
+    stepDistance+=player.position.distanceTo(previousPosition);
+    if(player.position.y<.03&&stepDistance>(player.sprinting?1.1:.88)){
+      audio.footstep(currentSector?'concrete':'gravel',player.sprinting);stepDistance=0;
+    }
+    let threat=0;for(const b of game.state.bosses.values())if(b.active&&!b.dead)threat=Math.max(threat,Math.max(0,1-b.position.distanceTo(player.position)/20));
+    audio.setTension(Math.max(threat,game.state.execution?.9:0));
   }
   if(playing&&!game.state.execution&&firing&&runtime-lastShot>=canon.Weapon.FireInterval){
     if(game.fire(camera.position,camera.getWorldDirection(new THREE.Vector3()))){
@@ -292,7 +324,7 @@ requestAnimationFrame(frame);
 
 // Query-gated test hooks are absent from normal play and never confer server authority.
 if(new URLSearchParams(location.search).has('test')){
-  window.__chernobyl={game,world,player,missions:missionDirector,get cameraMode(){return cameraMode;},get stamina(){return stamina;},get paused(){return paused;},settings,
+  window.__chernobyl={game,world,player,missions:missionDirector,audio,checkpointOperator,renderer,get cameraMode(){return cameraMode;},get stamina(){return stamina;},get paused(){return paused;},settings,
     start:(force='Nu-7',mode='tour')=>newRun(force,mode),
     teleport(position){player.position.set(...position);game.state.playerPosition.copy(player.position);},
     lookAt(position){const delta=new THREE.Vector3(...position).sub(camera.position);yaw=Math.atan2(-delta.x,-delta.z);pitch=Math.atan2(delta.y,Math.hypot(delta.x,delta.z));},

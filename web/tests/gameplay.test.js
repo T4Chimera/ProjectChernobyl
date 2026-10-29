@@ -6,7 +6,7 @@ import { createGameplay } from '../src/gameplay.js';
 
 // Actual Three.js geometry/raycasting and exported game data run headlessly.
 // Rendering, pointer lock, browser audio, and full-map navigation need browser tests.
-function fixture(t) {
+function fixture(t, isolatedEncounters = false) {
   const scene = new THREE.Scene();
   const events = [];
   const bossSpawns = Object.fromEntries(Object.keys(canon.Bosses).map((id, index) => [id, new THREE.Vector3(40 + index * 5, 0, 40)]));
@@ -19,6 +19,19 @@ function fixture(t) {
     mikoyanRoom: new THREE.Box3(new THREE.Vector3(-13, -1, -8), new THREE.Vector3(-7, 4, -2)),
     interactables: [{ id: 'supply-checkpoint', kind: 'supply', position: new THREE.Vector3(1, 0, 0) }],
   };
+  if (isolatedEncounters) {
+    world.sectors = [{ id: 1, center: new THREE.Vector3(0, 0, -25), size: new THREE.Vector3(40, 6, 40) }];
+    world.bossSpawns.Felon.set(0, 0, -20);
+    world.bossEncounters = {
+      Felon: { sector: 1, prerequisites: ['intake-logs', 'personnel-archive'], activationDistance: 18, leashRadius: 14 },
+      Novak: { sector: 1, prerequisites: ['personnel-archive'], requiresBosses: ['Nikolai'], activationDistance: 18, leashRadius: 14 },
+    };
+    world.bossSpawns.Novak.set(8, 0, -25);
+    world.interactables.push(
+      { id: 'intake-logs', kind: 'terminal', position: new THREE.Vector3(0, 1, -9) },
+      { id: 'personnel-archive', kind: 'terminal', position: new THREE.Vector3(0, 1, -13) },
+    );
+  }
   const game = createGameplay({ scene, world, canon, onEvent: event => events.push(event) });
   t.after(() => game.dispose());
   game.start('Nu-7', 'tour');
@@ -146,4 +159,91 @@ test('execution stages intact third-person actors, blocks fire, completes death,
   f.game.respawn();
   assert.equal(f.game.state.phase, 'playing');
   assert.equal(f.game.state.hp, 100);
+});
+
+test('NPC soles start on the floor and chase integrates between AI decisions', t => {
+  const f = fixture(t);
+  for (const actor of [...f.game.state.bosses.values(), ...f.game.state.infected]) {
+    assert.equal(actor.position.y, 0, `${actor.id} must not spawn with a hover offset`);
+  }
+  const infected = f.game.state.infected[0];
+  f.tick(2); // Establish the chasing destination at the bounded AI tick.
+  const before = infected.position.clone();
+  const previousDistance = infected.motion.distance;
+  f.game.update(0.02, { position: new THREE.Vector3(), direction: new THREE.Vector3(-1, 0, 0), moving: false });
+  const travelled = before.distanceTo(infected.position);
+  assert(travelled > 0, 'root advances on a render frame without waiting for another AI tick');
+  assert(travelled <= infected.settings.WalkSpeed * 0.25 * 0.02 + 1e-8, 'frame displacement respects walk speed');
+  assert.equal(infected.position.y, 0);
+  assert(Math.abs(infected.motion.distance - previousDistance - travelled) < 1e-8, 'gait distance tracks actual displacement');
+  assert(Math.abs(infected.motion.speed - travelled / 0.02) < 1e-8);
+  assert(infected.moving);
+});
+
+test('a blocked actor rests instead of advancing a walking cycle in place', t => {
+  const f = fixture(t);
+  const infected = f.game.state.infected[0];
+  const before = infected.position.clone();
+  f.world.colliders.push(new THREE.Box3(new THREE.Vector3(-30, 0, -30), new THREE.Vector3(30, 3, 30)));
+  f.tick(4);
+  assert(infected.position.equals(before));
+  assert.equal(infected.moving, false);
+  assert.equal(infected.motion.speed, 0);
+  assert.equal(infected.motion.distance, 0);
+});
+
+test('distant render culling preserves boss state and authoritative ray hits', t => {
+  const f = fixture(t);
+  const felon = f.game.state.bosses.get('Felon');
+  felon.position.set(0, 0, -70);
+  f.game.update(0.01, { position: new THREE.Vector3(), direction: new THREE.Vector3(0, 0, -1), moving: false });
+  assert.equal(felon.mesh.visible, false);
+  assert.equal(felon.hp, 1500);
+  assert(f.game.fire(new THREE.Vector3(0, 1.4, 0), new THREE.Vector3(0, 0, -1)));
+  assert.equal(felon.hp, 1460, 'omitting visual work must not remove the boss hit geometry');
+  assert.equal(f.game.state.deadBosses.size, 0);
+});
+
+test('entrance introduces ordinary infected while unique encounters wait for their local mission prerequisites', t => {
+  const f = fixture(t, true);
+  const felon = f.game.state.bosses.get('Felon');
+  const originalHome = felon.home.clone();
+  assert.equal(felon.active, false);
+  assert.equal(felon.mesh.visible, false);
+  f.tick(100);
+  assert(felon.position.equals(originalHome), 'dormant bosses do not patrol toward the entrance');
+  assert.equal(felon.hp, 1500, 'canonical health remains available for the mission registry');
+  assert(f.game.state.infected.some(actor => actor.active && !actor.dead));
+  assert(!f.events.some(event => event.speaker === 'Felon'), 'dormant encounters do not announce themselves');
+
+  assert(f.game.fire(new THREE.Vector3(0, 1.4, 0), new THREE.Vector3(0, 0, -1)));
+  assert.equal(felon.hp, 1500, 'unspawned encounters are excluded from authoritative shot candidates');
+  f.setPosition(new THREE.Vector3(0, 0, -9)); f.tick(2);
+  assert(f.game.interact('intake-logs'));
+  assert.equal(felon.active, false, 'entering the hall and completing only one prerequisite is insufficient');
+  f.setPosition(new THREE.Vector3(0, 0, -13)); f.tick(2);
+  assert(f.game.interact('personnel-archive'));
+  assert.equal(felon.active, true);
+  assert.equal(felon.mesh.visible, true);
+  assert(f.game.fire(new THREE.Vector3(0, 1.4, -13), new THREE.Vector3(0, 0, -1)));
+  assert.equal(felon.hp, 1460, 'the isolated activated encounter accepts normal weapon damage');
+  assert.equal(f.game.state.bosses.get('Novak').active, false, 'required preceding boss defeats also gate later encounters');
+});
+
+test('activated bosses stay within their encounter hall when the player retreats and activation survives respawn', t => {
+  const f = fixture(t, true);
+  f.setPosition(new THREE.Vector3(0, 0, -9)); f.tick(2); f.game.interact('intake-logs');
+  f.setPosition(new THREE.Vector3(0, 0, -13)); f.tick(2); f.game.interact('personnel-archive');
+  const felon = f.game.state.bosses.get('Felon');
+  assert(felon.active);
+  f.tick(10);
+  f.setPosition(new THREE.Vector3(0, 0, -1)); f.tick(200);
+  assert(felon.position.z <= -5.6, 'a boss cannot walk out of its hall toward insertion');
+  assert(felon.position.distanceTo(felon.home) <= 14 + 1e-8, 'its isolated home leash also applies to each movement step');
+  assert.notEqual(felon.target, 'player', 'retreating beyond the hall breaks player pursuit');
+  f.game.respawn();
+  assert(felon.active, 'player respawn does not rebuild the unique encounter');
+  assert.equal(f.game.state.bosses.get('Felon'), felon);
+  f.game.start('Nu-7', 'tour');
+  assert.equal(f.game.state.bosses.get('Felon').active, false, 'starting a fresh run clears encounter prerequisites');
 });

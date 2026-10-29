@@ -7,6 +7,8 @@ from playwright.sync_api import sync_playwright
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://127.0.0.1:4173/")
 parser.add_argument("--screenshots", default="/tmp/chernobyl-browser-check")
+parser.add_argument("--quality", choices=["high", "balanced"], default="balanced",
+    help="Balanced keeps full gameplay while reducing software-rendered shadow cost")
 args = parser.parse_args()
 output = Path(args.screenshots)
 output.mkdir(parents=True, exist_ok=True)
@@ -21,9 +23,14 @@ with sync_playwright() as p:
     page.goto(args.url + separator + "test", wait_until="networkidle")
     page.get_by_role("button", name="DEPLOY TO THE ZONE", exact=False).wait_for()
     page.screenshot(path=str(output / "intro.png"))
+    page.locator(f'.intro-screen [data-quality="{args.quality}"]').click()
     page.get_by_role("button", name="RECON TOUR", exact=False).click()
     page.get_by_role("button", name="DEPLOY TO THE ZONE", exact=False).click()
     page.wait_for_function("__chernobyl.cameraMode === 'first-person' && !__chernobyl.paused")
+    assert page.evaluate("[...__chernobyl.game.state.bosses.values()].every(b=>b.id==='Mikoyan'||!b.active)"), "Hostile bosses spawned at entrance"
+    assert page.evaluate("__chernobyl.game.state.infected.some(b=>b.active&&!b.dead)"), "No ordinary infected available"
+    audio = page.evaluate("__chernobyl.audio.getDebugState()")
+    assert audio["initialized"] and audio["contextState"] == "running" and audio["musicActive"]
     before = page.evaluate("__chernobyl.player.position.x")
     page.keyboard.down("Shift")
     page.keyboard.down("w")
@@ -48,12 +55,30 @@ with sync_playwright() as p:
     assert accepted and page.evaluate("__chernobyl.missions.index") == 1
     print("PASS real radio interaction advances Overwatch mission")
 
+    # Discover Felon using real field interactions, then approach his isolated
+    # area. Dormant bosses cannot be forced into executions at the entrance.
+    discovered = page.evaluate("""() => {
+      const h=__chernobyl;
+      for(const id of ['intake-logs','personnel-archive']) {
+        const t=h.world.interactables.find(t=>t.id===id);let accepted=false;
+        for(let i=0;i<16&&!accepted;i++) {
+          h.teleport([t.position.x+Math.cos(i*Math.PI/8)*1.6,0,t.position.z+Math.sin(i*Math.PI/8)*1.6]);
+          accepted=h.game.interact(id);
+        }
+        if(!accepted)return false;
+      }
+      const b=h.game.state.bosses.get('Felon');
+      h.teleport([b.home.x,0,b.home.z+1]);h.game.update(.01,h.player);
+      return b.active;
+    }""")
+    assert discovered, "Field work failed to activate isolated Felon encounter"
+    print("PASS ordinary infected first; boss activation requires later field work and approach")
     page.evaluate("""() => {
       const h=__chernobyl;
       for(let i=0;i<36;i++) h.game.update(.1,h.player);
       h.game.state.mode='operative';h.setHealth(20);
       const boss=h.game.state.bosses.get('Felon');
-      boss.position.copy(h.player.position);boss.position.z-=1;
+      h.teleport([boss.position.x,0,boss.position.z+1]);
       boss.nextAttack=-1;boss.pendingHit=null;
       h.game.update(.1,h.player);h.game.update(.1,h.player);
     }""")
@@ -66,12 +91,15 @@ with sync_playwright() as p:
     assert page.evaluate("__chernobyl.missions.index") == 1
     print("PASS execution switches to third-person, death staging, redeploy restores 100HP/first-person and retains mission")
 
+    # Release the desktop WebGL context before opening the touch viewport. This
+    # keeps headless software rendering from running two full scenes at once.
+    page.close()
     mobile = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
     mobile.on("pageerror", lambda error: errors.append(str(error)))
     mobile.goto(args.url, wait_until="networkidle")
     assert mobile.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Mobile horizontal overflow"
     mobile.get_by_role("button", name="DEPLOY TO THE ZONE", exact=False).scroll_into_view_if_needed()
-    mobile.screenshot(path=str(output / "mobile.png"), full_page=True)
+    mobile.screenshot(path=str(output / "mobile.png"))
     print("PASS mobile intro layout without horizontal overflow")
     assert not errors, "Browser runtime errors: " + repr(errors)
     print("PASS zero browser runtime errors")

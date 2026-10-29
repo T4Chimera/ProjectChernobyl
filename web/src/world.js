@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import {createIndustrialMaterials,scaleBoxUVs} from './materials.js';
 
 // All dimensions derive from the Luau prototype at one-quarter scale. This is
 // a fictionalized industrial site, with operational units 1–4 and unfinished 5–6.
@@ -21,23 +22,6 @@ function canvas(width, height) {
   return typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(width, height) : null;
 }
 
-function noiseTexture(seed, base) {
-  let current = seed;
-  const data = new Uint8Array(64 * 64 * 4);
-  for (let index = 0; index < 64 * 64; index++) {
-    current = (current * 1664525 + 1013904223) >>> 0;
-    const shade = ((current >>> 24) / 255 - 0.5) * 21;
-    for (let channel = 0; channel < 3; channel++) data[index * 4 + channel] = Math.max(0, Math.min(255, base[channel] + shade));
-    data[index * 4 + 3] = 255;
-  }
-  const texture = new THREE.DataTexture(data, 64, 64, THREE.RGBAFormat);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
-}
-
 export function createWorld(scene, canon) {
   const root = new THREE.Group();
   root.name = 'ChernobylMap';
@@ -49,27 +33,11 @@ export function createWorld(scene, canon) {
   const interactables = [];
   const animated = [];
   const geometry = new Map();
-  const concreteMap = noiseTexture(1986, [111, 119, 116]);
-  const asphaltMap = noiseTexture(26, [69, 77, 72]);
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x66746d, map: concreteMap, roughness: 0.95 });
-  const lowerWall = new THREE.MeshStandardMaterial({ color: 0x3b5148, roughness: 0.98 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x45514f, metalness: 0.55, roughness: 0.6 });
-  const iron = new THREE.MeshStandardMaterial({ color: 0x242d2b, metalness: 0.58, roughness: 0.7 });
-  const rust = new THREE.MeshStandardMaterial({ color: 0x614a36, roughness: 0.93, metalness: 0.35 });
-  const black = new THREE.MeshStandardMaterial({ color: 0x131b1b, roughness: 0.73 });
-  const yellow = new THREE.MeshStandardMaterial({ color: 0xa58c45, roughness: 0.8 });
-  const green = new THREE.MeshStandardMaterial({ color: 0x526745, roughness: 0.84 });
-  const wood = new THREE.MeshStandardMaterial({ color: 0x574c3c, roughness: 1 });
-  const paper = new THREE.MeshStandardMaterial({ color: 0xb5b39c, roughness: 1 });
-  const blue = new THREE.MeshStandardMaterial({ color: 0x3a5661, metalness: 0.3, roughness: 0.7 });
-  const deadTube = new THREE.MeshStandardMaterial({ color: 0x818b80, roughness: 0.5 });
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x414b41, map: asphaltMap, roughness: 1 });
-  const cautionMat = new THREE.MeshBasicMaterial({ color: 0xa18b4d, transparent: true, opacity: 0.48 });
-  const whitePaint = new THREE.MeshStandardMaterial({ color: 0xa3aca0, roughness: 1 });
+  const {concrete,brick,lowerWall,steel,iron,rust,black,yellow,green,wood,paper,blue,deadTube,asphalt,cautionMat,whitePaint,glass,rubber}=createIndustrialMaterials();
 
   function box(name, size, position, material = concrete, solid = false, parent = root) {
     const key = size.join(',');
-    if (!geometry.has(key)) geometry.set(key, new THREE.BoxGeometry(...size));
+    if (!geometry.has(key)) geometry.set(key, scaleBoxUVs(new THREE.BoxGeometry(...size),size));
     const mesh = new THREE.Mesh(geometry.get(key), material);
     mesh.name = name;
     mesh.position.set(...position);
@@ -104,14 +72,18 @@ export function createWorld(scene, canon) {
 
   function sign(name, text, position, width = 4.8, height = 1.1, angle = 0, color = '#b9c6a3') {
     const surface = canvas(768, 192);
+    const painted = name === 'ChernobylPlantLettering' || name === 'EntranceUnitMark';
     let material;
     if (surface) {
       const ctx = surface.getContext('2d');
-      ctx.fillStyle = '#101b17';
-      ctx.fillRect(0, 0, 768, 192);
-      ctx.strokeStyle = '#637164';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(8, 8, 752, 176);
+      if (painted) ctx.clearRect(0, 0, 768, 192);
+      else {
+        ctx.fillStyle = '#121716';
+        ctx.fillRect(0, 0, 768, 192);
+        ctx.strokeStyle = '#6e746c';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(8, 8, 752, 176);
+      }
       ctx.fillStyle = color;
       ctx.font = 'bold 42px monospace';
       ctx.textAlign = 'center';
@@ -120,8 +92,9 @@ export function createWorld(scene, canon) {
       lines.forEach((line, index) => ctx.fillText(line, 384, 96 + (index - (lines.length - 1) / 2) * 54, 710));
       const texture = new THREE.CanvasTexture(surface);
       texture.colorSpace = THREE.SRGBColorSpace;
-      material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.FrontSide });
-    } else material = new THREE.MeshBasicMaterial({ color: 0x8d9c7d, side: THREE.FrontSide });
+      material = new THREE.MeshStandardMaterial({ map: texture, roughness:.93, side: THREE.FrontSide,
+        transparent:painted, opacity:painted?.72:1, alphaTest:painted?.02:0, depthWrite:!painted });
+    } else material = new THREE.MeshStandardMaterial({ color: 0x8d9c7d, roughness:.93, side: THREE.FrontSide });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
     mesh.name = name;
     mesh.position.set(...position);
@@ -221,7 +194,7 @@ export function createWorld(scene, canon) {
 
   // A level asphalt apron joins all interior floors. It provides a real route
   // between the halls instead of empty gaps or invisible traversal barriers.
-  box('PlantApron', [205, 0.2, 130], [-5, -0.13, 27.5], asphalt);
+  box('PlantApron', [205, 0.2, 130], [-5, -0.1, 27.5], asphalt);
   box('WesternPerimeter', [0.6, 3.6, 130], [-107.5, 1.8, 27.5], concrete, true);
   box('EasternPerimeter', [0.6, 3.6, 130], [97.5, 1.8, 27.5], concrete, true);
   box('NorthernPerimeter', [205, 3.6, 0.6], [-5, 1.8, -37.5], concrete, true);
@@ -322,13 +295,13 @@ export function createWorld(scene, canon) {
     const group = new THREE.Group();
     group.name = `Sector${sector.id}`;
     root.add(group);
-    box('SectorFloor', [45, 0.1, 40], [x, 0, z], concrete);
+    box('SectorFloor', [45, 0.1, 40], [x, -0.05, z], concrete);
     // Four generous entrances are cut out of each wall. Wall segments and
     // permanent passages are separate geometry, so minimap topology is honest.
     for (const side of [-1, 1]) {
       for (const half of [-1, 1]) {
-        box('OuterWallEastWest', [0.5, 6, 18], [x + side * 22.5, 3, z + half * 11], concrete, true);
-        box('OuterWallNorthSouth', [20.5, 6, 0.5], [x + half * 12.25, 3, z + side * 20], concrete, true);
+        box('OuterWallEastWest', [0.5, 6, 18], [x + side * 22.5, 3, z + half * 11], brick, true);
+        box('OuterWallNorthSouth', [20.5, 6, 0.5], [x + half * 12.25, 3, z + side * 20], brick, true);
         // Muted green lower wall paint gives the flashlight more surface detail.
         box('WallPaintEastWest', [0.52, 1.6, 18], [x + side * 22.5, 0.8, z + half * 11], lowerWall);
         box('WallPaintNorthSouth', [20.5, 1.6, 0.52], [x + half * 12.25, 0.8, z + side * 20], lowerWall);
@@ -380,7 +353,7 @@ export function createWorld(scene, canon) {
     const delta = b.clone().sub(a);
     const alongX = Math.abs(delta.x) > Math.abs(delta.z);
     const length = delta.length();
-    box('ConnectingWalkway', alongX ? [length, 0.12, 4] : [4, 0.12, length], [center.x, 0.02, center.z], steel);
+    box('ConnectingWalkway', alongX ? [length, 0.12, 4] : [4, 0.12, length], [center.x, -0.06, center.z], steel);
     for (const side of [-1, 1]) {
       box('FadedWalkwayStripe', alongX ? [length, 0.01, 0.08] : [0.08, 0.01, length], [center.x + (alongX ? 0 : side * 1.8), 0.095, center.z + (alongX ? side * 1.8 : 0)], cautionMat);
     }
@@ -391,14 +364,14 @@ export function createWorld(scene, canon) {
 
   const checkpoint = vector(canon.Map.Checkpoint);
   checkpoint.y = 0;
-  box('CheckpointCanopy', [10.5, 0.3, 8.5], [checkpoint.x, 3.4, 0], iron);
+  box('CheckpointCanopy', [10.5, 0.22, 3.8], [checkpoint.x, 3.4, -4.75], iron);
   for (const depth of [-1, 1]) {
-    box('CheckpointConcreteBarrier', [10.5, 2.9, 0.3], [checkpoint.x, 1.45, depth * 3.75], concrete, true);
+    box('CheckpointConcreteBarrier', [10.5, 0.85, 0.3], [checkpoint.x, 0.425, depth * 3.75], concrete, true);
     for (const side of [-1, 1]) box('CheckpointPost', [0.32, 3.5, 0.32], [checkpoint.x + side * 5, 1.75, depth * 3.6], steel, true);
   }
-  box('CheckpointFloor', [11, 0.1, 8], [checkpoint.x, 0, 0], concrete);
+  box('CheckpointFloor', [11, 0.1, 8], [checkpoint.x, -0.05, 0], concrete);
   sign('CheckpointIdentification', 'SCP FOUNDATION\nCHERNOBYL FIELD CHECKPOINT', [checkpoint.x, 2.4, -3.55], 8.3, 1.35);
-  sign('CheckpointReturnSign', 'FIELD CHECKPOINT\nEXTRACTION / WEST', [checkpoint.x + 5.5, 2.8, 0], 4.8, 1.1, Math.PI / 2);
+  sign('CheckpointReturnSign', 'FIELD CHECKPOINT\nEXTRACTION / WEST', [checkpoint.x + 5.5, 1.7, 3.6], 2.3, 0.65, Math.PI / 2);
   sign('WarningPlacard', 'RADIATION HAZARD\nWEAPON LIGHT REQUIRED', [checkpoint.x - 4.2, 1.7, -3.5], 1.6, 1.4, 0, '#bba462');
   fixture(checkpoint.x, 3.15, 0);
   terminal('radio', 'Establish Overwatch radio link', checkpoint.x - 1.5, -2.6, 0);
@@ -431,10 +404,174 @@ export function createWorld(scene, canon) {
   const bossSpawns = Object.fromEntries(Object.entries(canon.Map.BossSpawns).map(([id, point]) => {
     const location = vector(point); location.y = 0; return [id, location];
   }));
+  // Browser encounter staging: the intake opens with ordinary infected, while
+  // unique contacts stay in deeper service areas until field work uncovers them.
+  bossSpawns.Felon.set(-39, 0, -13);
+  bossSpawns.John.set(70, 0, 9);
+  const bossEncounters = {
+    Felon: { sector: 1, prerequisites: ['intake-logs', 'personnel-archive'], activationDistance: 18, leashRadius: 13 },
+    Nikolai: { sector: 2, prerequisites: ['turbine-valve'], requiresBosses: ['Felon'], activationDistance: 20, leashRadius: 16 },
+    Novak: { sector: 2, prerequisites: ['turbine-valve'], requiresBosses: ['Nikolai'], activationDistance: 20, leashRadius: 16 },
+    John: { sector: 3, prerequisites: ['control-backup'], requiresBosses: ['Novak'], activationDistance: 18, leashRadius: 14 },
+    Sukhoi: { sector: 4, prerequisites: ['research-case'], requiresBosses: ['John'], activationDistance: 20, leashRadius: 16 },
+    Jayden: { sector: 5, prerequisites: ['transmitter'], requiresBosses: ['Sukhoi'], activationDistance: 20, leashRadius: 16 },
+    Katya: { sector: 6, prerequisites: ['uplink'], requiresBosses: ['Jayden'], activationDistance: 20, leashRadius: 16 },
+  };
   const infectedSpawns = canon.Map.InfectedSpawns.map(point => { const location = vector(point); location.y = 0; return location; });
+  infectedSpawns[0].set(-73, 0, 8);
+  infectedSpawns[1].set(-70, 0, -6);
   const roomCenter = vector(canon.Map.MikoyanRoom.Center);
   const roomSize = vector(canon.Map.MikoyanRoom.Size);
   const mikoyanRoom = new THREE.Box3().setFromCenterAndSize(roomCenter, roomSize);
+
+  // Reference-inspired industrial entrance: the facade is a layered physical
+  // building shell, not a flat title board. The existing four-metre passage and
+  // every mission coordinate remain clear beneath it.
+  const gateX = -77.5;
+  for (const side of [-1, 1]) {
+    box('GatehouseBrickTower', [1.1, 11.5, 15], [gateX - 0.2, 5.75, side * 12], brick);
+    box('FacadeConcreteFooting', [1.25, 1.05, 15], [gateX - 0.24, 0.525, side * 12], concrete);
+    box('FacadeSteelPier', [0.48, 12.3, 0.48], [gateX - 0.85, 6.15, side * 4.8], iron);
+    box('FacadeOuterPier', [0.55, 12.3, 0.55], [gateX - 0.8, 6.15, side * 19.4], steel);
+    box('GateCanopyPost', [0.3, 4.1, 0.3], [gateX - 2.1, 2.05, side * 2.9], steel);
+    box('EntryDoorFrame', [0.6, 3.8, 0.3], [gateX - 0.5, 1.9, side * 2.05], iron);
+    for(let y=4.3;y<10.8;y+=2.35) {
+      box('WindowConcreteSill',[0.38,0.18,8.5],[gateX-.9,y-.48,side*11.3],concrete);
+      for(let bay=0;bay<4;bay++) {
+        const z=side*11.3+(bay-1.5)*1.9;
+        box('FactoryWindowFrame',[.26,.95,1.68],[gateX-.79,y,z],iron);
+        box('DirtyFactoryWindow',[.045,.73,1.42],[gateX-.94,y,z],glass);
+        box('WindowMullion',[.07,.77,.055],[gateX-.98,y,z],steel);
+      }
+    }
+    pipe([gateX-1.03,.3,side*18],[gateX-1.03,11.6,side*18],.105,rust);
+    for(let y=1;y<11.6;y+=2)box('DownpipeBracket',[.18,.07,.35],[gateX-1.03,y,side*18],iron);
+    box('BlindFloodlightBracket',[.3,.2,.2],[gateX-1.15,6.2,side*6.1],steel);
+    box('UnpoweredEntranceFloodlight',[.22,.48,.7],[gateX-1.35,6.2,side*6.1],black);
+    box('UnpoweredFloodlightLens',[.025,.3,.5],[gateX-1.47,6.2,side*6.1],deadTube);
+    sign('GateRadiationPlaque','☢\nRADIATION / RESTRICTED',[gateX-1.02,2.15,side*5.55],1.8,1.65,-Math.PI/2,'#c2aa6b');
+  }
+  box('EntranceFacadeHeader',[1.1,7.9,9],[gateX-.2,7.75,0],brick);
+  box('EntranceStoneLintel',[1.45,.42,10.4],[gateX-.38,4.05,0],concrete);
+  box('EntranceCanopyRoof',[3.2,.24,6.4],[gateX-1.3,4.25,0],concrete);
+  box('EntranceCanopySteelLip',[.12,.24,6.45],[gateX-2.92,4.19,0],steel);
+  box('GatehouseCornice',[1.5,.38,40.5],[gateX-.15,11.7,0],concrete);
+  sign('ChernobylPlantLettering','CHERNOBYL NPP',[gateX-.79,9.5,0],14.2,2.1,-Math.PI/2,'#a9ada4');
+  sign('EntranceUnitMark','UNIT 01  /  SECURITY ACCESS',[gateX-.84,5.45,0],7.3,.7,-Math.PI/2,'#b7b8a5');
+  sign('EntranceSmallSecuritySign','AUTHORIZED PERSONNEL ONLY',[gateX-1.05,2.8,-3.1],2.4,.58,-Math.PI/2,'#b6ad8b');
+  // Roller-shutter housing and tracks are visible with the slab raised. It never
+  // becomes a new invisible gate that could block Overwatch's first objectives.
+  box('RaisedRollerShutterHousing',[.65,.65,4.1],[gateX-.65,3.5,0],iron);
+  for(let strip=0;strip<4;strip++)box('RaisedShutterSlat',[.68,.055,4.04],[gateX-.65,3.2+strip*.13,0],steel);
+
+  function jerseyBarrier(x,z,length=2.2) {
+    box('JerseyBarrierBase',[.8,.22,length],[x,.11,z],concrete);
+    box('JerseyBarrierBody',[.53,.72,length-.14],[x,.5,z],concrete,true);
+    box('JerseyBarrierTop',[.33,.14,length-.2],[x,.92,z],concrete);
+    for(const side of [-1,1]) {
+      const patch=box('BarrierReflectivePatch',[.018,.14,.32],[x+side*.28,.68,z],yellow);
+      patch.rotation.x=.08;
+    }
+  }
+  // Lane furniture stays outside the checkpoint-to-door route (|z|<2m).
+  for(const z of [-3.25,3.25])for(const x of [-86,-82.5])jerseyBarrier(x,z);
+  for(const z of [-2.25,2.25]) {
+    box('GateBollard',[.2,1.35,.2],[gateX-2.4,.675,z],yellow,true);
+    for(let i=0;i<3;i++)box('BollardDarkBand',[.205,.15,.205],[gateX-2.4,.35+i*.35,z],black);
+  }
+
+  // Field vehicle: wheels, hubs, grille, bonnet, mirrors, bumper, storage and
+  // cargo framing remain readable at first-person scale. Headlights stay off.
+  function tacticalTransport(x,z) {
+    box('TransportChassis',[2.65,.32,5.9],[x,.8,z],iron,true);
+    box('TransportHood',[2.45,.68,1.45],[x,1.45,z-2],green);
+    box('TransportCabShell',[2.52,1.62,1.9],[x,1.95,z-.5],green,true);
+    box('TransportFrontGlass',[2.13,.67,.065],[x,2.25,z-1.49],glass);
+    box('TransportWindowCenterBar',[.09,.75,.08],[x,2.25,z-1.52],iron);
+    for(const side of [-1,1]) {
+      box('TransportDoorWindow',[.055,.67,1.2],[x+side*1.28,2.25,z-.48],glass);
+      box('TransportCabDoor',[.07,.65,1.52],[x+side*1.28,1.5,z-.48],green);
+      box('TransportDoorHandle',[.12,.07,.25],[x+side*1.34,1.77,z+.05],iron);
+      pipe([x+side*1.27,2.4,z-1.1],[x+side*1.6,2.4,z-1.1],.035,iron);
+      box('TransportMirror',[.13,.35,.22],[x+side*1.62,2.35,z-1.1],black);
+      box('TransportCargoRail',[.12,.62,3.1],[x+side*1.28,1.55,z+1.8],green);
+      for(let i=0;i<4;i++)box('CargoBedUpright',[.11,1.4,.11],[x+side*1.25,2.05,z+.3+i*.85],steel);
+      pipe([x+side*1.25,2.75,z+.3],[x+side*1.25,2.75,z+2.85],.06,steel);
+      for(const axle of [-1.6,1.8]) {
+        const tire=cylinder('TransportTire',.64,.36,[x+side*1.31,.65,z+axle],rubber);
+        tire.rotation.z=Math.PI/2;
+        const hub=cylinder('TransportWheelHub',.34,.39,[x+side*1.33,.65,z+axle],iron);
+        hub.rotation.z=Math.PI/2;
+        for(let bolt=0;bolt<6;bolt++)box('WheelHubBolt',[.055,.055,.055],[x+side*1.55,.65+Math.cos(bolt*Math.PI/3)*.2,z+axle+Math.sin(bolt*Math.PI/3)*.2],steel);
+        box('WheelArchFender',[.45,.13,1.55],[x+side*1.17,1.36,z+axle],green);
+      }
+    }
+    box('TransportCargoDeck',[2.5,.25,3.1],[x,1.15,z+1.75],wood);
+    box('TransportRearTailgate',[2.55,.75,.13],[x,1.55,z+3.2],green);
+    box('TransportFrontBumper',[2.85,.25,.3],[x,.95,z-2.85],iron);
+    box('TransportFrontGrille',[1.38,.43,.06],[x,1.35,z-2.76],black);
+    for(let i=0;i<8;i++)box('GrilleSlat',[.06,.36,.08],[x-.55+i*.16,1.35,z-2.8],steel);
+    for(const side of [-1,1]) {
+      const lamp=cylinder('UnpoweredVehicleHeadlight',.19,.08,[x+side*.94,1.44,z-2.76],deadTube, false,12);
+      lamp.rotation.x=Math.PI/2;
+    }
+    sign('VehicleFoundationMark','SCP\nFIELD TRANSPORT',[x-1.32,1.6,z+.6],.7,.55,-Math.PI/2,'#bac2ad');
+  }
+  tacticalTransport(-84.4,-8.4);
+
+  function pallet(x,z,levels=1) {
+    for(let level=0;level<levels;level++) {
+      for(let slat=0;slat<5;slat++)box('PalletSlat',[1.6,.08,.16],[x,.18+level*.24,z+(slat-2)*.22],wood);
+      for(const dx of [-.62,0,.62])box('PalletRunner',[.12,.14,1.12],[x+dx,.08+level*.24,z],wood);
+    }
+  }
+  for(let i=0;i<3;i++)pallet(-94.5+i*1.8,6.5,2+(i%2));
+  // Small covered staging bay, sandbags, generator and fuel drums.
+  box('StagingTentRoof',[5.8,.18,4.6],[-88.7,3.25,8.4],green);
+  for(const dx of [-2.7,2.7])for(const dz of [-2.1,2.1])pipe([-88.7+dx,.05,8.4+dz],[-88.7+dx,3.3,8.4+dz],.06,steel);
+  box('GeneratorEngine',[1.35,.9,.8],[-88.8,.55,9],green,true);
+  box('GeneratorFuelCap',[.2,.12,.2],[-88.8,1.06,9],iron);
+  for(const side of [-1,1])pipe([-89.5,.25,9+side*.5],[-88.1,.25,9+side*.5],.06,iron);
+  for(let i=0;i<6;i++)box('GeneratorCoolingFin',[.05,.65,.045],[-89.49,.58,8.72+i*.1],steel);
+  pipe([-88.4,.8,9.25],[-88.4,1.4,9.25],.04,iron);
+  for(let row=0;row<2;row++)for(let i=0;i<5;i++) {
+    const bag=box('CheckpointSandbag',[.82,.24,.4],[-90.4+i*.75+row*.35,.14+row*.23,6.3],wood);
+    bag.rotation.y=(i%2-.5)*.08;
+  }
+  for(const dz of [-1,1]) {
+    cylinder('FuelDrum',.36,1.08,[-92,.55,8.5+dz*.5],green,false,12);
+    for(const y of [.25,.84])cylinder('FuelDrumBand',.375,.055,[-92,y,8.5+dz*.5],iron,false,12);
+  }
+  sign('StagingAreaPlacard','FOUNDATION LOGISTICS\nNO OPEN FLAMES',[-89.8,1.9,6.25],3.8,.8,0,'#b1b6a5');
+
+  // Rooftop plant silhouettes and far yard service lines give the compound
+  // scale beyond identical room boxes. They remain outside traversable ground.
+  for(const s of sectors) {
+    const {x,z}=s.center;
+    if(s.id<=4) {
+      cylinder('PlantVentStack',.75,7.5,[x+14.5,9.8,z-12.5],brick,false,16);
+      cylinder('VentStackCap',.87,.3,[x+14.5,13.6,z-12.5],iron,false,16);
+      for(const y of [7.4,10.4])cylinder('StackStructuralBand',.79,.14,[x+14.5,y,z-12.5],steel,false,16);
+      box('RooftopVentilationUnit',[4.5,1.4,3],[x-12,6.95,z-12],steel);
+      for(let i=0;i<6;i++)box('VentLouvre',[4.2,.05,.08],[x-12,6.45+i*.18,z-13.55],black);
+    }
+    for(const side of [-1,1]) {
+      for(let i=0;i<4;i++)box('FacadeExpansionRib',[.24,6.25,.16],[x+side*22.8,3.1,z-16+i*10.5],iron);
+      for(let y=2.9;y<5.7;y+=1.35)pipe([x-21.9,y,z-18],[x-21.9,y,z+18],.045,steel);
+    }
+    // Weather-stained hazard plates and flaking numbered utility panels.
+    sign('SectorSafetyBoard','DANGER\nHIGH VOLTAGE / LOCKED OUT',[x+21.9,2.3,z+12.2],1.9,1.1,-Math.PI/2,'#c1a66b');
+    for(let line=0;line<3;line++)box('FloorDrainGrating',[3.2,.015,.07],[x+3.8,.015,z+12+line*.14],iron);
+  }
+  // Low-cost wet patches catch the weapon beam. No lights are added to fixtures.
+  const wet=new THREE.MeshStandardMaterial({color:0x25302d,metalness:.45,roughness:.16,transparent:true,opacity:.5,depthWrite:false});
+  for(let i=0;i<26;i++) {
+    const puddle=new THREE.Mesh(new THREE.CircleGeometry(.7+(i%5)*.28,16),wet);
+    puddle.name='RainPuddle';puddle.rotation.x=-Math.PI/2;
+    puddle.scale.y=.4+(i%3)*.18;
+    puddle.position.set(-98+(i*7.13)%26,.012,-12+(i*4.97)%27);
+    root.add(puddle);
+  }
   root.updateWorldMatrix(true, true);
 
   // Most details repeat one of a handful of surfaces. Bake their world matrices
@@ -471,7 +608,7 @@ export function createWorld(scene, canon) {
   root.updateWorldMatrix(true, true);
 
   return {
-    root, colliders, occluders: finalOccluders, sectors, spawn: checkpoint, bossSpawns,
+    root, colliders, occluders: finalOccluders, sectors, spawn: checkpoint, bossSpawns, bossEncounters,
     infectedSpawns, mikoyanRoom, interactables,
     minimap: { bounds: { minX: -108, maxX: 98, minZ: -38, maxZ: 93 }, walls },
     update(dt, time) {

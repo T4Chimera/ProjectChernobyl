@@ -1,5 +1,36 @@
 # Development record
 
+## 2026-10-29 — Browser visual, movement, audio and encounter upgrade
+
+- Rebuilt tactical figures with segmented elbows/knees/ankles, layered armor,
+  masks, helmet optics, pouches, gloves and proportionate carried rifles. Leg IK
+  plants stance feet; arm IK aligns both hands to the rifle. Idle breathing and
+  smooth collision-swept locomotion use actual movement instead of AI tick jumps.
+- Added weathered albedo/normal/roughness surfaces, a tall industrial entrance,
+  detailed transport/staging equipment, wet ground, rain, moisture and sky
+  reflections. Facility fixtures stay off; the permanent weapon light remains.
+- Rebuilt the first-person rifle/hands/reload presentation and added visible
+  operator legs when looking down and an idle Foundation checkpoint guard.
+- Added an original procedural humming/drone score, weather/harmonic layers,
+  bounded audio graphs, footsteps and weapon handling effects. Improved installed
+  system voice selection, character profiles and dialogue scheduling; exact
+  canonical text remains unchanged. These are not recorded actor performances.
+- Added circular radar, compact Overwatch orders, restrained vitals/subtitles,
+  mobile layout corrections, independent music/voice and High/Balanced settings.
+- Moved Felon deeper into intake and John into control. All hostile bosses now
+  wait for local field work, prior required defeats, sector entry and approach;
+  they stay tethered to their encounter hall. Regular infected introduce intake.
+  Mikoyan remains peaceful unless shot from his room. Defeats persist on redeploy.
+- Validation: all 27 browser logic/real-Three tests and the production build pass.
+  Chromium verifies intro/deploy, real movement/stamina, running ambient audio,
+  actual radio/objective interaction, staged boss discovery, third-person
+  execution/death/redeployment, retained progress and 390px layout; no runtime
+  errors. Closed the desktop WebGL context before mobile screenshots to prevent
+  competing software renderers from stalling capture.
+- All 36 existing Luau CLI tests pass and Rojo builds the preserved Studio
+  project. This does not claim Roblox Studio engine testing or final art/acting.
+- Public deployment is verified separately after pushing this release.
+
 ## 2026-10-28 — Public Pages deployment verified
 
 - Repository is public and Pages is enabled with the GitHub Actions source.

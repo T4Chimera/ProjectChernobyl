@@ -78,3 +78,19 @@ WebAudio SFX, missionchain>=15 operationaltasks+extraction, build/Pages/test.
 Agentmodules import Three via `import * as THREE from 'three'` and canon root
 passesdata. Avoid circular imports. No frameworks required. Localenv Node24+
 Chromium+pythonPlaywrightavailable. Npmtoolinstall parenthandles.
+
+## Browser 0.3 additions
+
+- World additionally returns `bossEncounters`: per-ID `{sector, prerequisites:
+  string[], requiresBosses?:string[], activationDistance, leashRadius}`. Browser
+  encounter positions may override the exported prototype spawn coordinates.
+- NPC records expose `active` and `encounter`. Dormant bosses cannot move, speak,
+  receive hits or damage the player. UI threat bars/music exclude dormant records;
+  mission objective markers can still guide the player to their encounter area.
+- Actor roots use feet y=0. `animateActor` accepts optional sixth argument
+  `{speed,distance,heading}` for continuous, distance-driven locomotion.
+- `weapon-view.js` and `atmosphere.js` own the first-person rifle and weather.
+  Graphics quality is `high` or `balanced`; all plant fixtures remain unpowered.
+- Audio adds `setMix({music,voice,effects})`, `setTension(0..1)`, `reload()`,
+  `footstep(surface,sprinting)`, `dispose()` and `getDebugState()`. Music/voice
+  settings are independent booleans. Speech remains browser/OS synthesis.
