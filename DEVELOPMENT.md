@@ -29,6 +29,13 @@
   all nine clips decoding, no TTS, mission activation, third-person execution,
   respawn and 390px layout with zero runtime errors. All 36 existing Luau CLI
   tests and the Rojo build pass; Studio engine acceptance remains pending.
+- Published release `0784461`; Pages run `40864629680` built and deployed
+  successfully. The public index, split engine/game chunks, rifle WAV files and
+  56-row CSV return HTTP 200. Chromium rendered the public responses, verified
+  the six R6 primary parts, decoded all nine samples without failures, played
+  recorded gunfire from real input, and reported zero TTS/runtime errors. No
+  hostile bosses are active at insertion. Play:
+  https://t4chimera.github.io/ProjectChernobyl/?v=0.4.0
 
 ## 2026-10-29 — Browser visual, movement, audio and encounter upgrade
 
